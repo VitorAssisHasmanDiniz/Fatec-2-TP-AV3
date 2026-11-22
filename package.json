@@ -9,6 +9,7 @@
     "start": "node dist/src/server.js",
     "typecheck": "tsc --noEmit",
     "test:analytics": "tsx --test tests/analytics.test.ts",
+    "seed:dados": "tsx prisma/seed-dados.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {

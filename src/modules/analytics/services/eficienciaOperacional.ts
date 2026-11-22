@@ -1,6 +1,6 @@
 import { mean } from "simple-statistics";
-import AppError from "../../../../errors/AppError.js";
-import { prisma } from "../../../../lib/prisma.js";
+import AppError from "../../../errors/AppError.js";
+import { prisma } from "../../../lib/prisma.js";
 import { TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
 import { calcularResumoEstatistico } from "../calculosEstatisticos.js";
 import { calcularJanelaPeriodoAnterior } from "../funcoesAnaliticas.js";

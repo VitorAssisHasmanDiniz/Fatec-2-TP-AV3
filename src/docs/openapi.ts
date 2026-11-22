@@ -3,7 +3,12 @@ const resposta = {
     properties: {
         nivel: { type: "string", example: "SUCESSO" },
         mensagem: { type: "string", example: "Operação realizada com sucesso." },
-        dados: { type: "object", additionalProperties: true },
+        dados: {
+            oneOf: [
+                { type: "object", additionalProperties: true },
+                { type: "array", items: { type: "object", additionalProperties: true } },
+            ],
+        },
     },
 };
 
@@ -26,21 +31,97 @@ const pathId = {
     schema: { type: "string", example: "fla-1895-uuid" },
 };
 
-const op = (summary: string, tags: string[], options: Record<string, any> = {}) => ({
-    summary,
-    tags,
-    security: options.public ? [] : [{ bearerAuth: [] }],
-    ...(options.parameters ? { parameters: options.parameters } : {}),
-    ...(options.requestBody ? { requestBody: options.requestBody } : {}),
-    responses: {
-        "200": { description: "Requisição processada.", content: { "application/json": { schema: resposta } } },
-        ...(options.created ? { "201": { description: "Registro criado." } } : {}),
-        "400": { description: "Dados enviados inválidos." },
-        "401": { description: "Token ausente, inválido ou credenciais incorretas." },
-        "403": { description: "Perfil sem permissão para executar a operação." },
-        "500": { description: "Erro interno da API." },
-    },
-});
+interface OpcoesOperacao {
+    public?: boolean;
+    created?: boolean;
+    parameters?: unknown[];
+    requestBody?: ReturnType<typeof jsonBody>;
+    description?: string;
+    responseExample?: Record<string, unknown>;
+    additionalResponses?: Record<string, unknown>;
+}
+
+function respostaDeErro(
+    codigo: string,
+    mensagem: string,
+    descricao: string,
+) {
+    return {
+        description: descricao,
+        content: {
+            "application/json": {
+                schema: {
+                    type: "object",
+                    properties: {
+                        nivel: { type: "string", example: "ERRO" },
+                        mensagem: { type: "string", example: mensagem },
+                        codigo: { type: "string", example: codigo },
+                    },
+                },
+                example: { nivel: "ERRO", mensagem, codigo },
+            },
+        },
+    };
+}
+
+const op = (
+    summary: string,
+    tags: string[],
+    options: OpcoesOperacao = {},
+) => {
+    const exemploResposta = options.responseExample;
+    const conteudoResposta = {
+        schema: resposta,
+        ...(exemploResposta ? { example: exemploResposta } : {}),
+    };
+
+    return {
+        summary,
+        tags,
+        ...(options.description ? { description: options.description } : {}),
+        security: options.public ? [] : [{ bearerAuth: [] }],
+        ...(options.parameters ? { parameters: options.parameters } : {}),
+        ...(options.requestBody ? { requestBody: options.requestBody } : {}),
+        responses: {
+            "200": {
+                description: "Requisição processada.",
+                content: { "application/json": conteudoResposta },
+            },
+            ...(options.created ? {
+                "201": {
+                    description: "Registro criado.",
+                    content: { "application/json": conteudoResposta },
+                },
+            } : {}),
+            "400": respostaDeErro(
+                "DADOS_INVALIDOS",
+                "Os dados enviados são inválidos.",
+                "Validação do corpo, parâmetros ou filtros falhou.",
+            ),
+            "401": respostaDeErro(
+                "TOKEN_INVALIDO",
+                "Token ausente, inválido ou expirado.",
+                "Autenticação necessária.",
+            ),
+            "403": respostaDeErro(
+                "PERMISSAO_NEGADA",
+                "Você não tem permissão para executar esta operação.",
+                "Perfil sem autorização para a operação.",
+            ),
+            "404": respostaDeErro(
+                "RECURSO_NAO_ENCONTRADO",
+                "Registro não encontrado.",
+                "O recurso solicitado não existe.",
+            ),
+            "500": respostaDeErro(
+                "ERRO_INTERNO",
+                "Erro interno do servidor.",
+                "Falha inesperada no servidor.",
+            ),
+            ...options.additionalResponses,
+        },
+    };
+};
 
 const query = (name: string, description: string, example = "") => ({ name, in: "query", required: false, description, schema: { type: "string", ...(example ? { example } : {}) } });
 
@@ -64,6 +145,7 @@ const openapi = {
         { name: "Configuração", description: "Configurações da aplicação." },
         { name: "Auditoria", description: "Registros de auditoria." },
         { name: "Relatórios", description: "Relatórios operacionais e financeiros." },
+        { name: "Analytics", description: "Análises de eficiência operacional, rentabilidade e previsão de vida útil." },
     ],
     components: {
         securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT", description: "Cole somente o token JWT retornado por /auth/login." } },
@@ -134,15 +216,89 @@ const openapi = {
         "/equipamentos/{id}/rastreamento": { get: op("Consultar histórico de rastreamento", ["Equipamentos"], { parameters: [pathId] }), patch: op("Atualizar status de rastreamento", ["Equipamentos"], { parameters: [pathId], requestBody: jsonBody({ statusRastreamento: "EM_MANUTENCAO", responsavel: "Deyverson Silva", observacao: "Enviado para reparo na São Januário Tecnologias" }) }) },
         "/equipamentos/{id}/depreciacao": { get: op("Calcular depreciação do equipamento", ["Equipamentos"], { parameters: [pathId] }) },
         "/equipamentos/{id}/recuperacao": {
-            get: op("Listar registros de recuperação financeira", ["Equipamentos"], { parameters: [pathId] }),
-            post: op("Registrar recuperação financeira", ["Equipamentos"], { parameters: [pathId], created: true, requestBody: jsonBody({ valorRecuperacao: 125.50, observacao: "Recuperação de componentes e mão de obra." }) })
+            get: op("Listar registros de recuperação financeira", ["Equipamentos"], {
+                parameters: [pathId],
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO.",
+                responseExample: { nivel: "SUCESSO", mensagem: "Recuperações consultadas com sucesso.", dados: [{ id: "rec-uuid", valorRecuperacao: "125.50", registradoEm: "2026-11-02T12:00:00.000Z", observacao: "Recuperação de componentes." }] },
+                additionalResponses: { "404": respostaDeErro("EQUIPAMENTO_NAO_ENCONTRADO", "Equipamento não encontrado.", "O equipamento informado não existe.") },
+            }),
+            post: op("Registrar recuperação financeira", ["Equipamentos"], {
+                parameters: [pathId],
+                created: true,
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO.",
+                requestBody: jsonBody({ valorRecuperacao: 125.50, observacao: "Recuperação de componentes e mão de obra." }),
+                responseExample: { nivel: "SUCESSO", mensagem: "Recuperação registrada com sucesso.", dados: { id: "rec-uuid", valorRecuperacao: "125.50" } },
+                additionalResponses: { "404": respostaDeErro("EQUIPAMENTO_NAO_ENCONTRADO", "Equipamento não encontrado.", "O equipamento informado não existe.") },
+            })
         },
         "/equipamentos/{id}/observacoes-condicao": {
-            get: op("Listar observações de condição do equipamento", ["Equipamentos"], { parameters: [pathId] }),
-            post: op("Registrar observação de condição (100 = perfeito; 0 = inservível)", ["Equipamentos"], { parameters: [pathId], created: true, requestBody: jsonBody({ indiceCondicao: 78, falhaRegistrada: true, observacao: "Falha intermitente identificada durante inspeção." }) })
+            get: op("Listar observações de condição do equipamento", ["Equipamentos"], {
+                parameters: [pathId],
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO. Escala: 100 = perfeito; 0 = inservível.",
+                responseExample: { nivel: "SUCESSO", mensagem: "Observações de condição consultadas com sucesso.", dados: [{ id: "obs-uuid", indiceCondicao: 78, falhaRegistrada: true, observadoEm: "2026-10-05T12:00:00.000Z", observacao: "Falha intermitente." }] },
+                additionalResponses: { "404": respostaDeErro("EQUIPAMENTO_NAO_ENCONTRADO", "Equipamento não encontrado.", "O equipamento informado não existe.") },
+            }),
+            post: op("Registrar observação de condição (100 = perfeito; 0 = inservível)", ["Equipamentos"], {
+                parameters: [pathId],
+                created: true,
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO. O índice deve estar entre 0 e 100.",
+                requestBody: jsonBody({ indiceCondicao: 78, falhaRegistrada: true, observacao: "Falha intermitente identificada durante inspeção." }),
+                responseExample: { nivel: "SUCESSO", mensagem: "Observação de condição registrada com sucesso.", dados: { id: "obs-uuid", indiceCondicao: 78, falhaRegistrada: true } },
+                additionalResponses: { "404": respostaDeErro("EQUIPAMENTO_NAO_ENCONTRADO", "Equipamento não encontrado.", "O equipamento informado não existe.") },
+            })
         },
         "/equipamentos/{id}/movimentacoes": { post: op("Registrar movimentação de equipamento", ["Equipamentos"], { parameters: [pathId], created: true, requestBody: jsonBody({ destino: "Almoxarifado Beira-Rio", responsavel: "Fernandão Silva", observacao: "Transferência para partida do Brasileirão" }) }) },
         "/equipamentos/{id}/estado-fisico": { patch: op("Atualizar estado físico do equipamento", ["Equipamentos"], { parameters: [pathId], requestBody: jsonBody({ estadoFisico: "BOM_ESTADO", justificativa: "Inspeção pós-jogo concluída no Couto Pereira", responsavel: "Alex de Souza" }) }) },
+        "/api/v1/internal/analytics/eficiencia-operacional": {
+            post: op("Executar análise de eficiência operacional", ["Analytics"], {
+                created: true,
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO. Calcula duração de triagem por operador e compara com o período anterior de mesma duração.",
+                requestBody: jsonBody({ organizacaoId: "ORG002", dataInicio: "2026-08-01T00:00:00.000Z", dataFim: "2026-11-30T23:59:59.999Z", unidadePeriodo: "MES" }),
+                responseExample: { nivel: "SUCESSO", mensagem: "Análise de eficiência operacional concluída.", dados: { relatorioId: "rel-uuid", tipo: "EFICIENCIA_OPERACIONAL", resumo: { quantidadeLotes: 12, tempoMedioHoras: 18.4, tempoMedianoHoras: 16, desvioPadraoHoras: 4.2, tempoMedioPeriodoAnteriorHoras: 22.1, variacaoPercentual: -16.74, quantidadeGargalos: 1 }, resultados: [{ operadorId: "usuario-uuid", nomeOperador: "Operador Seed", quantidadeLotes: 6, tempoMedioHoras: 18.4, gargalo: false }] } },
+                additionalResponses: {
+                    "404": respostaDeErro("ORGANIZACAO_NAO_ENCONTRADA", "Organização não encontrada.", "A organização informada não existe."),
+                },
+            }),
+        },
+        "/api/v1/internal/analytics/rentabilidade": {
+            post: op("Executar análise de rentabilidade dos equipamentos", ["Analytics"], {
+                created: true,
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO. Agrupa recuperações por tipo, estado físico, marca e modelo, ordenando pela recuperação média e total.",
+                requestBody: jsonBody({ organizacaoId: "ORG001", dataInicio: "2026-01-01T00:00:00.000Z", dataFim: "2026-12-31T23:59:59.999Z" }),
+                responseExample: { nivel: "SUCESSO", mensagem: "Análise de rentabilidade concluída.", dados: { relatorioId: "rel-uuid", tipo: "RENTABILIDADE_EQUIPAMENTOS", resumo: { quantidadeRegistros: 5, valorTotalRecuperacao: 3001.25, quantidadeGrupos: 4 }, resultados: [{ tipoEquipamento: "NOTEBOOK", estadoFisico: "USADO_LEVE", marca: "Lenovo", modelo: "ThinkPad", quantidade: 2, valorTotalRecuperacao: 900, valorMedioRecuperacao: 450, posicaoRanking: 1 }] } },
+                additionalResponses: {
+                    "404": respostaDeErro("ORGANIZACAO_NAO_ENCONTRADA", "Organização não encontrada.", "A organização informada não existe."),
+                },
+            }),
+        },
+        "/api/v1/internal/analytics/vida-util": {
+            post: op("Executar previsão de vida útil", ["Analytics"], {
+                created: true,
+                description: "Perfis permitidos: ADMINISTRADOR e GESTOR_ALMOXARIFADO. A regressão é calculada separadamente por equipamento; o resultado do grupo usa medianas das vidas e dos R².",
+                requestBody: jsonBody({ organizacaoId: "ORG001", minimoAmostras: 3 }),
+                responseExample: { nivel: "SUCESSO", mensagem: "Previsão de vida útil concluída.", dados: { relatorioId: "rel-uuid", tipo: "PREVISAO_VIDA_UTIL", resumo: { gruposAnalisados: 1, previsoesDisponiveis: 1, equipamentosIgnorados: 0, metodologia: "Regressão linear individual por equipamento." }, resultados: [{ tipoEquipamento: "NOTEBOOK", marca: "Dell", modelo: "Latitude", amostras: 8, metodo: "REGRESSAO_LINEAR", rQuadrado: 0.98, vidaRemanescenteMeses: 5.2, dataPrevistaInservivel: "2027-04-22T00:00:00.000Z", equipamentosAnalisados: 2, taxaFalhas: 0.5, previsaoDisponivel: true, motivoIndisponivel: null }] } },
+                additionalResponses: {
+                    "404": respostaDeErro("ORGANIZACAO_NAO_ENCONTRADA", "Organização não encontrada.", "A organização informada não existe."),
+                },
+            }),
+        },
+        "/api/v1/internal/analytics/historico": {
+            get: op("Consultar histórico de relatórios analíticos", ["Analytics"], {
+                parameters: [query("tipo", "Tipo de relatório", "EFICIENCIA_OPERACIONAL"), query("organizacaoId", "ID da organização", "ORG001"), query("inicio", "Data inicial ISO 8601", "2026-01-01T00:00:00.000Z"), query("fim", "Data final ISO 8601", "2026-12-31T23:59:59.999Z"), query("limite", "Quantidade de relatórios (1 a 100; padrão 20)", "20")],
+                description: "Disponível para qualquer perfil autenticado.",
+                responseExample: { nivel: "SUCESSO", mensagem: "Histórico analítico consultado.", dados: [{ id: "rel-eficiencia", tipo: "EFICIENCIA_OPERACIONAL", geradoEm: "2026-11-22T12:00:00.000Z", versaoModelo: "1.0.0", resumo: { quantidadeLotes: 12, quantidadeGargalos: 1 }, resultadosEficiencia: [{ gargalo: true }] }, { id: "rel-rentabilidade", tipo: "RENTABILIDADE_EQUIPAMENTOS", geradoEm: "2026-11-22T12:10:00.000Z", versaoModelo: "1.0.0", resumo: { quantidadeRegistros: 5, valorTotalRecuperacao: 3001.25, quantidadeGrupos: 4 }, resultadosRentabilidade: [] }] },
+            }),
+        },
+        "/api/v1/internal/analytics/historico/{id}": {
+            get: op("Consultar relatório analítico por ID", ["Analytics"], {
+                parameters: [{ ...pathId, schema: { type: "string", format: "uuid", example: "00000000-0000-4000-8000-000000000001" } }],
+                description: "Disponível para qualquer perfil autenticado.",
+                responseExample: { nivel: "SUCESSO", mensagem: "Relatório analítico consultado.", dados: { id: "rel-uuid", tipo: "RENTABILIDADE_EQUIPAMENTOS", geradoEm: "2026-11-22T12:00:00.000Z", versaoModelo: "1.0.0", resumo: { quantidadeRegistros: 5, valorTotalRecuperacao: 3001.25, quantidadeGrupos: 4 }, resultadosRentabilidade: [] } },
+                additionalResponses: {
+                    "404": respostaDeErro("RELATORIO_NAO_ENCONTRADO", "Relatório analítico não encontrado.", "Não existe relatório com o UUID informado."),
+                },
+            }),
+        },
         "/configuracao": {
             get: op("Consultar configurações", ["Configuração"]),
             patch: op("Atualizar configurações", ["Configuração"], { requestBody: jsonBody({ aliquotaImposto: 0.05, coeficienteDepreciacao: 0.08 }) }),

@@ -46,6 +46,44 @@ O alias `/clientes` aponta para as mesmas rotas de `/organizacoes`, preservando 
 
 As exclusões de organização e lote são bloqueadas quando existem dependências que tornariam o histórico inconsistente. Equipamentos removidos têm as movimentações operacionais removidas junto, mas a ação de exclusão fica registrada na auditoria.
 
+## Camada analítica
+
+A camada analítica persiste cada execução em um relatório mestre (`relatorios_analiticos`) e nos resultados específicos de cada análise. Os relatórios guardam tipo, organização, data de geração, `versaoModelo`, parâmetros em JSON e resumo; as tabelas filhas guardam os resultados detalhados. Isso permite consultar o histórico e comparar execuções feitas com versões ou parâmetros diferentes.
+
+### Análises disponíveis
+
+- **Eficiência operacional:** mede o tempo entre a entrada do lote e `triagemConcluidaEm`, agrupando por operador e mês/trimestre. Compara o intervalo com o período anterior de mesma duração. Um grupo é gargalo quando seu tempo médio supera 1,5 vez a média geral do intervalo.
+- **Rentabilidade de equipamentos:** agrega os valores de recuperação por tipo, estado físico, marca e modelo. O ranking prioriza valor médio recuperado e usa o valor total como desempate; o resumo preserva o total recuperado e `quantidadeGrupos`.
+- **Previsão de vida útil:** ajusta uma regressão linear por equipamento, usando índice de condição e meses desde a primeira observação daquele equipamento. A vida remanescente do grupo é a mediana das previsões individuais e o R² do grupo é a mediana dos R² individuais. Falhas registradas e índice final igual ou inferior a zero resultam em vida remanescente zero.
+
+### Rotas e permissões
+
+Base: `/api/v1/internal/analytics`. Todas as rotas exigem JWT. As três operações `POST` abaixo permitem somente `ADMINISTRADOR` e `GESTOR_ALMOXARIFADO`; os GETs de histórico permitem qualquer perfil autenticado (`ADMINISTRADOR`, `OPERADOR_CADASTRO`, `GESTOR_ALMOXARIFADO` ou `AUDITOR`).
+
+| Método | Rota | Finalidade | Perfil |
+|---|---|---|---|
+| `POST` | `/api/v1/internal/analytics/eficiencia-operacional` | Executar eficiência operacional. Corpo opcional: `organizacaoId`, `dataInicio`, `dataFim`, `unidadePeriodo` (`MES` ou `TRIMESTRE`). | Administrador, gestor de almoxarifado |
+| `POST` | `/api/v1/internal/analytics/rentabilidade` | Executar rentabilidade. Corpo opcional: `organizacaoId`, `dataInicio`, `dataFim`. | Administrador, gestor de almoxarifado |
+| `POST` | `/api/v1/internal/analytics/vida-util` | Executar previsão. Corpo opcional: `organizacaoId`, `minimoAmostras` (padrão 3). | Administrador, gestor de almoxarifado |
+| `GET` | `/api/v1/internal/analytics/historico` | Listar relatórios; filtros opcionais `tipo`, `organizacaoId`, `inicio`, `fim`, `limite` (padrão 20, máximo 100). | Todos os perfis autenticados |
+| `GET` | `/api/v1/internal/analytics/historico/:id` | Consultar um relatório e seus resultados pelo UUID. | Todos os perfis autenticados |
+
+As análises usam dados alimentados pelas quatro operações de equipamento: `POST` e `GET /equipamentos/:id/recuperacao` e `POST` e `GET /equipamentos/:id/observacoes-condicao`. Essas quatro operações permitem `ADMINISTRADOR` e `GESTOR_ALMOXARIFADO`. A primeira registra/consulta valores recuperados; a segunda registra/consulta o índice de condição e `falhaRegistrada`. Também são necessários lotes com triagem concluída para a análise de eficiência.
+
+O índice de condição é uma escala de **0 a 100**, em que **100 significa equipamento em condição perfeita** e **0 significa inservível**. Para uma previsão por regressão, o equipamento precisa ter ao menos o número configurado de observações (padrão 3) e pelo menos duas datas distintas. Equipamentos que não atendem aos requisitos são contabilizados como ignorados.
+
+### Agendamentos
+
+Os jobs são opcionais e iniciam junto com o servidor. Configure as variáveis abaixo com expressões aceitas pelo `node-cron`; valor vazio ou somente espaços desativa o job. Exemplo: `0 2 * * *` executa diariamente às 02:00, no fuso horário local do processo.
+
+```dotenv
+ANALYTICS_CRON_EFICIENCIA=0 2 * * *
+ANALYTICS_CRON_RENTABILIDADE=0 3 * * 1
+ANALYTICS_CRON_VIDA_UTIL=0 4 1 * *
+```
+
+Para alimentar o banco local com dados demonstrativos, execute `npm run seed:dados` após aplicar as migrations e definir `ADM_SENHA` (mínimo de 8 caracteres). O seed usa `upsert` com identificadores estáveis e pode ser repetido sem duplicar os registros de demonstração. Ele inclui lotes com triagem concluída, recuperações financeiras e séries de observações de condição.
+
 ## Documentação Swagger
 
 Com a API em execução, abra no navegador:

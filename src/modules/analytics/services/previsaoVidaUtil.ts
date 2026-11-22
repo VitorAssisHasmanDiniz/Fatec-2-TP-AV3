@@ -1,4 +1,4 @@
-import { AppError } from "../../../errors/AppError.js";
+import AppError from "../../../errors/AppError.js";
 import { prisma } from "../../../lib/prisma.js";
 import { Prisma, TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
 import type {
@@ -16,7 +16,11 @@ import {
 
 const VERSAO_MODELO = "2.0.0";
 const MINIMO_PADRAO = 3;
-const METODOLOGIA = "Por equipamento, ajusta regressão linear do índice de condição em função dos meses desde a primeira observação individual. A previsão de cada grupo é a mediana das vidas remanescentes previstas; o R² do grupo é a mediana dos R² individuais. Equipamentos sem amostras suficientes ou sem duas datas distintas são ignorados.";
+const METODOLOGIA = [
+    "Por equipamento, ajusta regressão linear do índice de condição em função dos meses desde a primeira observação individual.",
+    "A previsão de cada grupo é a mediana das vidas remanescentes previstas; o R² do grupo é a mediana dos R² individuais.",
+    "Equipamentos sem amostras suficientes ou sem duas datas distintas são ignorados.",
+].join(" ");
 
 const selecaoObservacao = {
     id: true,

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import app from "./app.js";
 import { prisma } from "./lib/prisma.js";
-import { iniciarAgendamentosAnaliticos, pararAgendamentosAnaliticos } from "./modules/analytics/servicosAgendamento.js";
+import { iniciarAgendamentosAnaliticos, pararAgendamentosAnaliticos } from "./modules/analytics/agendamento.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 

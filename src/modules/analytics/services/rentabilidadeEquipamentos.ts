@@ -1,4 +1,5 @@
-import { prisma } from "../../../../lib/prisma.js";
+import AppError from "../../../errors/AppError.js";
+import { prisma } from "../../../lib/prisma.js";
 import { Prisma, TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
 import type {
     ParametrosRentabilidade,
@@ -45,6 +46,21 @@ function converterRegistro(
 export async function executarAnaliseRentabilidadeEquipamentos(
     parametros: ParametrosRentabilidade = {},
 ): Promise<ResultadoAnaliseRentabilidade> {
+    if (parametros.organizacaoId) {
+        const organizacao = await prisma.organizacao.findUnique({
+            where: { id: parametros.organizacaoId },
+            select: { id: true },
+        });
+
+        if (!organizacao) {
+            throw new AppError(
+                "Organização não encontrada.",
+                404,
+                "ORGANIZACAO_NAO_ENCONTRADA",
+            );
+        }
+    }
+
     const filtros: Prisma.RegistroRecuperacaoWhereInput = {};
 
     if (parametros.dataInicio || parametros.dataFim) {
