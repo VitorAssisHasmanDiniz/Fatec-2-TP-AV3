@@ -1,8 +1,8 @@
-export { executarAnaliseEficienciaOperacional } from "./services/eficienciaOperacional.js";
+
+export { executarAnaliseRentabilidadeEquipamentos } from "./services/rentabilidadeEquipamentos.js";
 export type {
-  ParametrosEficiencia,
-  ResultadoAnaliseEficiencia,
-  ResultadoEficienciaDetalhado,
-  ResultadoEficienciaResumo,
-  UnidadePeriodo,
+  ParametrosRentabilidade,
+  ResultadoAnaliseRentabilidade,
+  ResultadoRentabilidadeDetalhado,
+  ResultadoRentabilidadeResumo,
 } from "./tipos.js";
