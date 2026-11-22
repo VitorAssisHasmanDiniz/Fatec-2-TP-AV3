@@ -1,34 +1,41 @@
-/**
- * Tipos públicos compartilhados do módulo analítico.
- * Todos os nomes de domínio e propriedades estão em português.
- */
-
-export type TipoAnalise =
-    | "EFICIENCIA_OPERACIONAL"
-    | "RENTABILIDADE_EQUIPAMENTOS"
-    | "PREVISAO_VIDA_UTIL";
-
 export type UnidadePeriodo = "MES" | "TRIMESTRE";
 
-export interface ParametrosAnalise {
-    organizacaoId?: string;
-    dataInicio?: Date;
-    dataFim?: Date;
+export interface ParametrosEficiencia {
+  organizacaoId?: string;
+  dataInicio?: Date;
+  dataFim?: Date;
+  unidadePeriodo?: UnidadePeriodo;
 }
 
-export interface ResultadoRelatorio {
-    relatorioId: string;
-    tipo: TipoAnalise;
-    geradoEm: Date;
-    versaoModelo: string;
-    parametros: ParametrosAnalise;
-    resumo: Record<string, unknown>;
+export interface ResultadoEficienciaResumo {
+  quantidadeLotes: number;
+  tempoMedioHoras: number;
+  tempoMedianoHoras: number;
+  desvioPadraoHoras: number;
+  tempoMedioPeriodoAnteriorHoras: number | null;
+  variacaoPercentual: number | null;
+  quantidadeGargalos: number;
 }
 
-export interface FiltroHistoricoRelatorios {
-    tipo?: TipoAnalise;
-    organizacaoId?: string;
-    dataInicio?: Date;
-    dataFim?: Date;
-    limite?: number;
+export interface ResultadoEficienciaDetalhado {
+  operadorId: string | null;
+  nomeOperador: string;
+  inicioPeriodo: Date;
+  fimPeriodo: Date;
+  unidadePeriodo: UnidadePeriodo;
+  quantidadeLotes: number;
+  tempoMedioHoras: number;
+  tempoMedianoHoras: number;
+  desvioPadraoHoras: number;
+  gargalo: boolean;
+}
+
+export interface ResultadoAnaliseEficiencia {
+  relatorioId: string;
+  tipo: "EFICIENCIA_OPERACIONAL";
+  geradoEm: Date;
+  versaoModelo: string;
+  parametros: ParametrosEficiencia;
+  resumo: ResultadoEficienciaResumo;
+  resultados: ResultadoEficienciaDetalhado[];
 }
