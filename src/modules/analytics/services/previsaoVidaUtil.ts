@@ -1,91 +1,240 @@
-import { calcularRegressaoLinear } from "../calculosEstatisticos.js";
-import { prisma } from "../../../../lib/prisma.js";
-import { TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
+import { AppError } from "../../../errors/AppError.js";
+import { prisma } from "../../../lib/prisma.js";
+import { Prisma, TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
+import type {
+    EquipamentoParaAnaliseVidaUtil,
+    ObservacaoVidaUtil,
+    ParametrosPrevisaoVidaUtil,
+    ResultadoAnaliseVidaUtil,
+    ResultadoEquipamentoVidaUtil,
+    ResultadoPrevisaoVidaUtilDetalhado,
+} from "../tipos.js";
+import {
+    analisarEquipamentoVidaUtil,
+    calcularGrupoVidaUtil,
+} from "../funcoesVidaUtil.js";
 
-export interface ParametrosPrevisaoVidaUtil {
-  organizacaoId?: string;
-  minimoAmostras?: number;
-}
-
-export interface ResultadoPrevisaoVidaUtilDetalhado {
-  tipoEquipamento: string;
-  marca: string;
-  modelo: string;
-  amostras: number;
-  rQuadrado: number | null;
-  vidaRemanescenteMeses: number | null;
-  dataPrevistaInservivel: Date | null;
-  previsaoDisponivel: boolean;
-}
-
-export interface ResultadoAnaliseVidaUtil {
-  relatorioId: string;
-  tipo: "PREVISAO_VIDA_UTIL";
-  geradoEm: Date;
-  versaoModelo: string;
-  parametros: ParametrosPrevisaoVidaUtil;
-  resultados: ResultadoPrevisaoVidaUtilDetalhado[];
-}
-
-interface ObservacaoComEquipamento {
-  observadoEm: Date;
-  indiceCondicao: number;
-  equipamento: { tipo: string; marca: string; modelo: string; lote: { organizacaoId: string } };
-}
-
-const VERSAO_MODELO = "1.0.0";
-const LIMIAR_INSERVIVEL = 0;
+const VERSAO_MODELO = "2.0.0";
 const MINIMO_PADRAO = 3;
-const MS_POR_MES = 1000 * 60 * 60 * 24 * 30.4375;
+const METODOLOGIA = "Por equipamento, ajusta regressão linear do índice de condição em função dos meses desde a primeira observação individual. A previsão de cada grupo é a mediana das vidas remanescentes previstas; o R² do grupo é a mediana dos R² individuais. Equipamentos sem amostras suficientes ou sem duas datas distintas são ignorados.";
 
-function preverGrupo(observacoes: ObservacaoComEquipamento[], minimo: number): ResultadoPrevisaoVidaUtilDetalhado {
-  const primeiras = observacoes[0].equipamento;
-  const ordenadas = [...observacoes].sort((a, b) => a.observadoEm.getTime() - b.observadoEm.getTime());
-  const inicio = ordenadas[0].observadoEm.getTime();
-  const pontos: [number, number][] = ordenadas.map((o) => [(o.observadoEm.getTime() - inicio) / MS_POR_MES, o.indiceCondicao]);
-  if (pontos.length < minimo || pontos.every((p) => p[1] === pontos[0][1])) {
-    return { tipoEquipamento: primeiras.tipo, marca: primeiras.marca, modelo: primeiras.modelo, amostras: pontos.length, rQuadrado: null, vidaRemanescenteMeses: null, dataPrevistaInservivel: null, previsaoDisponivel: false };
-  }
-  const regressao = calcularRegressaoLinear(pontos);
-  const confianca = regressao.coeficienteDeterminacao;
-  const xAtual = pontos[pontos.length - 1][0];
-  const yAtual = pontos[pontos.length - 1][1];
-  const declive = regressao.inclinacao;
-  if (declive >= 0 || yAtual <= LIMIAR_INSERVIVEL) {
-    return { tipoEquipamento: primeiras.tipo, marca: primeiras.marca, modelo: primeiras.modelo, amostras: pontos.length, rQuadrado: Number(confianca.toFixed(4)), vidaRemanescenteMeses: yAtual <= LIMIAR_INSERVIVEL ? 0 : null, dataPrevistaInservivel: yAtual <= LIMIAR_INSERVIVEL ? ordenadas[ordenadas.length - 1].observadoEm : null, previsaoDisponivel: yAtual <= LIMIAR_INSERVIVEL };
-  }
-  const xAlvo = (LIMIAR_INSERVIVEL - regressao.intercepto) / declive;
-  const restante = Math.max(0, xAlvo - xAtual);
-  const dataPrevista = new Date(ordenadas[ordenadas.length - 1].observadoEm.getTime() + restante * MS_POR_MES);
-  return { tipoEquipamento: primeiras.tipo, marca: primeiras.marca, modelo: primeiras.modelo, amostras: pontos.length, rQuadrado: Number(confianca.toFixed(4)), vidaRemanescenteMeses: Number(restante.toFixed(2)), dataPrevistaInservivel: dataPrevista, previsaoDisponivel: true };
+const selecaoObservacao = {
+    id: true,
+    equipamentoId: true,
+    observadoEm: true,
+    indiceCondicao: true,
+    falhaRegistrada: true,
+    equipamento: {
+        select: {
+            id: true,
+            tipo: true,
+            marca: true,
+            modelo: true,
+        },
+    },
+} as const;
+
+type ObservacaoBanco = Prisma.ObservacaoCondicaoEquipamentoGetPayload<{
+    select: typeof selecaoObservacao;
+}>;
+
+function converterObservacao(observacao: ObservacaoBanco): {
+    equipamentoId: string;
+    tipoEquipamento: string;
+    marca: string;
+    modelo: string;
+    observacao: ObservacaoVidaUtil;
+} {
+    return {
+        equipamentoId: observacao.equipamento.id,
+        tipoEquipamento: observacao.equipamento.tipo,
+        marca: observacao.equipamento.marca,
+        modelo: observacao.equipamento.modelo,
+        observacao: {
+            observadoEm: observacao.observadoEm,
+            indiceCondicao: observacao.indiceCondicao,
+            falhaRegistrada: observacao.falhaRegistrada,
+        },
+    };
 }
 
-export async function executarPrevisaoVidaUtil(parametros: ParametrosPrevisaoVidaUtil = {}): Promise<ResultadoAnaliseVidaUtil> {
-  const minimo = parametros.minimoAmostras ?? MINIMO_PADRAO;
-  const observacoes = await prisma.observacaoCondicaoEquipamento.findMany({
-    where: parametros.organizacaoId ? { equipamento: { lote: { organizacaoId: parametros.organizacaoId } } } : {},
-    include: { equipamento: { select: { tipo: true, marca: true, modelo: true, lote: { select: { organizacaoId: true } } } } },
-    orderBy: { observadoEm: "asc" },
-  }) as unknown as ObservacaoComEquipamento[];
-  const grupos = new Map<string, ObservacaoComEquipamento[]>();
-  for (const observacao of observacoes) {
-    const equipamento = observacao.equipamento;
-    const chave = JSON.stringify([equipamento.tipo, equipamento.marca, equipamento.modelo]);
-    const grupo = grupos.get(chave) ?? [];
-    grupo.push(observacao);
-    grupos.set(chave, grupo);
-  }
-  const resultados = [...grupos.values()].map((grupo) => preverGrupo(grupo, minimo));
-  const geradoEm = new Date();
-  const relatorio = await prisma.relatorioAnalitico.create({
-    data: {
-      tipo: TipoRelatorioAnalitico.PREVISAO_VIDA_UTIL,
-      organizacaoId: parametros.organizacaoId,
-      versaoModelo: VERSAO_MODELO,
-      parametros: { ...parametros, minimoAmostras: minimo, limiarInservivel: LIMIAR_INSERVIVEL },
-      resumo: { gruposAnalisados: resultados.length, previsoesDisponiveis: resultados.filter((r) => r.previsaoDisponivel).length },
-      resultadosVidaUtil: { create: resultados.map((r) => ({ tipoEquipamento: r.tipoEquipamento, marca: r.marca, modelo: r.modelo, amostras: r.amostras, metodo: "REGRESSAO_LINEAR", rQuadrado: r.rQuadrado, vidaRemanescenteMeses: r.vidaRemanescenteMeses, dataPrevistaInservivel: r.dataPrevistaInservivel })) },
-    },
-  });
-  return { relatorioId: relatorio.id, tipo: "PREVISAO_VIDA_UTIL", geradoEm, versaoModelo: VERSAO_MODELO, parametros: { ...parametros, minimoAmostras: minimo }, resultados };
+function agruparPorModelo(
+    equipamentos: EquipamentoParaAnaliseVidaUtil[],
+): Map<string, EquipamentoParaAnaliseVidaUtil[]> {
+    const grupos = new Map<string, EquipamentoParaAnaliseVidaUtil[]>();
+
+    for (const equipamento of equipamentos) {
+        const chave = JSON.stringify([
+            equipamento.tipoEquipamento,
+            equipamento.marca,
+            equipamento.modelo,
+        ]);
+        const grupo = grupos.get(chave) ?? [];
+        grupo.push(equipamento);
+        grupos.set(chave, grupo);
+    }
+
+    return grupos;
+}
+
+function criarResultadoIndisponivel(
+    grupo: EquipamentoParaAnaliseVidaUtil[],
+    motivo: string,
+): ResultadoPrevisaoVidaUtilDetalhado {
+    const primeiroEquipamento = grupo[0];
+
+    if (!primeiroEquipamento) {
+        throw new Error("Não há equipamentos para criar o resultado do grupo.");
+    }
+
+    const equipamentosComFalha = grupo.filter((equipamento) =>
+        equipamento.observacoes.some((observacao) => observacao.falhaRegistrada),
+    ).length;
+
+    return {
+        tipoEquipamento: primeiroEquipamento.tipoEquipamento,
+        marca: primeiroEquipamento.marca,
+        modelo: primeiroEquipamento.modelo,
+        amostras: 0,
+        metodo: "REGRESSAO_LINEAR",
+        rQuadrado: null,
+        vidaRemanescenteMeses: null,
+        dataPrevistaInservivel: null,
+        equipamentosAnalisados: 0,
+        taxaFalhas: grupo.length > 0 ? equipamentosComFalha / grupo.length : 0,
+        previsaoDisponivel: false,
+        motivoIndisponivel: motivo,
+    };
+}
+
+export async function executarPrevisaoVidaUtil(
+    parametros: ParametrosPrevisaoVidaUtil = {},
+): Promise<ResultadoAnaliseVidaUtil> {
+    const minimoAmostras = parametros.minimoAmostras ?? MINIMO_PADRAO;
+
+    if (!Number.isInteger(minimoAmostras) || minimoAmostras < 1) {
+        throw new AppError(
+            "O mínimo de amostras deve ser um número inteiro igual ou maior que 1.",
+            400,
+            "MINIMO_AMOSTRAS_INVALIDO",
+        );
+    }
+
+    if (parametros.organizacaoId) {
+        const organizacao = await prisma.organizacao.findUnique({
+            where: { id: parametros.organizacaoId },
+            select: { id: true },
+        });
+
+        if (!organizacao) {
+            throw new AppError(
+                "Organização não encontrada.",
+                404,
+                "ORGANIZACAO_NAO_ENCONTRADA",
+            );
+        }
+    }
+
+    const filtros: Prisma.ObservacaoCondicaoEquipamentoWhereInput = {};
+
+    if (parametros.organizacaoId) {
+        filtros.equipamento = {
+            lote: { organizacaoId: parametros.organizacaoId },
+        };
+    }
+
+    const observacoes = await prisma.observacaoCondicaoEquipamento.findMany({
+        where: filtros,
+        select: selecaoObservacao,
+        orderBy: { observadoEm: "asc" },
+    });
+    const equipamentosPorId = new Map<string, EquipamentoParaAnaliseVidaUtil>();
+
+    for (const observacaoBanco of observacoes) {
+        const registro = converterObservacao(observacaoBanco);
+        const equipamentoExistente = equipamentosPorId.get(registro.equipamentoId);
+        const equipamento: EquipamentoParaAnaliseVidaUtil = equipamentoExistente ?? {
+            equipamentoId: registro.equipamentoId,
+            tipoEquipamento: registro.tipoEquipamento,
+            marca: registro.marca,
+            modelo: registro.modelo,
+            observacoes: [],
+        };
+
+        equipamento.observacoes.push(registro.observacao);
+        equipamentosPorId.set(registro.equipamentoId, equipamento);
+    }
+
+    const grupos = agruparPorModelo([...equipamentosPorId.values()]);
+    const resultados: ResultadoPrevisaoVidaUtilDetalhado[] = [];
+    let equipamentosIgnorados = 0;
+    const dataReferencia = new Date();
+
+    for (const grupo of grupos.values()) {
+        try {
+            const analises: ResultadoEquipamentoVidaUtil[] = grupo.map(
+                (equipamento) => analisarEquipamentoVidaUtil(equipamento, minimoAmostras),
+            );
+            equipamentosIgnorados += analises.filter((analise) => analise.ignorado).length;
+            resultados.push(
+                calcularGrupoVidaUtil(grupo, analises, dataReferencia),
+            );
+        } catch (erro) {
+            const motivo = erro instanceof Error
+                ? `Falha ao calcular o grupo: ${erro.message}`
+                : "Falha desconhecida ao calcular o grupo.";
+            resultados.push(criarResultadoIndisponivel(grupo, motivo));
+        }
+    }
+
+    const resumo = {
+        gruposAnalisados: resultados.length,
+        previsoesDisponiveis: resultados.filter(
+            (resultado) => resultado.previsaoDisponivel,
+        ).length,
+        equipamentosIgnorados,
+        metodologia: METODOLOGIA,
+    };
+    const relatorio = await prisma.relatorioAnalitico.create({
+        data: {
+            tipo: TipoRelatorioAnalitico.PREVISAO_VIDA_UTIL,
+            organizacaoId: parametros.organizacaoId,
+            versaoModelo: VERSAO_MODELO,
+            parametros: {
+                organizacaoId: parametros.organizacaoId,
+                minimoAmostras,
+                metodologia: METODOLOGIA,
+            },
+            resumo,
+            resultadosVidaUtil: {
+                create: resultados.map((resultado) => ({
+                    tipoEquipamento: resultado.tipoEquipamento,
+                    marca: resultado.marca,
+                    modelo: resultado.modelo,
+                    amostras: resultado.amostras,
+                    metodo: resultado.metodo,
+                    rQuadrado: resultado.rQuadrado,
+                    vidaRemanescenteMeses: resultado.vidaRemanescenteMeses,
+                    dataPrevistaInservivel: resultado.dataPrevistaInservivel,
+                    equipamentosAnalisados: resultado.equipamentosAnalisados,
+                    taxaFalhas: resultado.taxaFalhas,
+                    motivoIndisponivel: resultado.motivoIndisponivel,
+                    previsaoDisponivel: resultado.previsaoDisponivel,
+                })),
+            },
+        },
+    });
+
+    return {
+        relatorioId: relatorio.id,
+        tipo: "PREVISAO_VIDA_UTIL",
+        geradoEm: relatorio.geradoEm,
+        versaoModelo: VERSAO_MODELO,
+        parametros: {
+            ...parametros,
+            minimoAmostras,
+        },
+        resumo,
+        resultados,
+    };
 }

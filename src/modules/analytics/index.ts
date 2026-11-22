@@ -17,10 +17,14 @@ export type {
 
 export { executarPrevisaoVidaUtil } from "./services/previsaoVidaUtil.js";
 export type {
+    EquipamentoParaAnaliseVidaUtil,
+    ObservacaoVidaUtil,
     ParametrosPrevisaoVidaUtil,
     ResultadoAnaliseVidaUtil,
+    ResultadoEquipamentoVidaUtil,
     ResultadoPrevisaoVidaUtilDetalhado,
-} from "./services/previsaoVidaUtil.js";
+    ResumoPrevisaoVidaUtil,
+} from "./tipos.js";
 
 export { obterHistoricoRelatorios, obterRelatorioPorId } from "./consultas.js";
 export type { FiltrosHistoricoRelatorios } from "./consultas.js";

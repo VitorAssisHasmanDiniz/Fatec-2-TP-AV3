@@ -274,6 +274,10 @@ model ResultadoVidaUtil {
   rQuadrado Float?
   vidaRemanescenteMeses Float?
   dataPrevistaInservivel DateTime?
+  equipamentosAnalisados Int @default(0)
+  taxaFalhas Float @default(0)
+  motivoIndisponivel String?
+  previsaoDisponivel Boolean @default(false)
   relatorio RelatorioAnalitico @relation(fields: [relatorioId], references: [id], onDelete: Cascade)
 
   @@index([relatorioId])
