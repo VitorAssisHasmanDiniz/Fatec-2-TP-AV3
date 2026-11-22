@@ -1,4 +1,5 @@
-import { mean, median, standardDeviation } from "simple-statistics";
+import { mean } from "simple-statistics";
+import { calcularResumoEstatistico } from "../calculosEstatisticos.js";
 import { prisma } from "../../../../lib/prisma.js";
 import { TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
 import type {
@@ -81,20 +82,12 @@ function agruparLotes(
 
 function calcularResumo(duracoes: number[]): Pick<ResultadoEficienciaResumo,
   "quantidadeLotes" | "tempoMedioHoras" | "tempoMedianoHoras" | "desvioPadraoHoras"> {
-  if (duracoes.length === 0) {
-    return {
-      quantidadeLotes: 0,
-      tempoMedioHoras: 0,
-      tempoMedianoHoras: 0,
-      desvioPadraoHoras: 0,
-    };
-  }
-
+  const resumo = calcularResumoEstatistico(duracoes);
   return {
-    quantidadeLotes: duracoes.length,
-    tempoMedioHoras: mean(duracoes),
-    tempoMedianoHoras: median(duracoes),
-    desvioPadraoHoras: duracoes.length > 1 ? standardDeviation(duracoes) : 0,
+    quantidadeLotes: resumo.quantidade,
+    tempoMedioHoras: resumo.media,
+    tempoMedianoHoras: resumo.mediana,
+    desvioPadraoHoras: resumo.desvioPadrao,
   };
 }
 

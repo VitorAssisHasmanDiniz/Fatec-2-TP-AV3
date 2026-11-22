@@ -1,4 +1,4 @@
-import { linearRegression, linearRegressionLine, rSquared } from "simple-statistics";
+import { calcularRegressaoLinear } from "../calculosEstatisticos.js";
 import { prisma } from "../../../../lib/prisma.js";
 import { TipoRelatorioAnalitico } from "../../../../generated/prisma/client.js";
 
@@ -46,16 +46,15 @@ function preverGrupo(observacoes: ObservacaoComEquipamento[], minimo: number): R
   if (pontos.length < minimo || pontos.every((p) => p[1] === pontos[0][1])) {
     return { tipoEquipamento: primeiras.tipo, marca: primeiras.marca, modelo: primeiras.modelo, amostras: pontos.length, rQuadrado: null, vidaRemanescenteMeses: null, dataPrevistaInservivel: null, previsaoDisponivel: false };
   }
-  const regressao = linearRegression(pontos);
-  const linha = linearRegressionLine(regressao);
-  const confianca = rSquared(pontos, linha);
+  const regressao = calcularRegressaoLinear(pontos);
+  const confianca = regressao.coeficienteDeterminacao;
   const xAtual = pontos[pontos.length - 1][0];
   const yAtual = pontos[pontos.length - 1][1];
-  const declive = regressao.m;
+  const declive = regressao.inclinacao;
   if (declive >= 0 || yAtual <= LIMIAR_INSERVIVEL) {
     return { tipoEquipamento: primeiras.tipo, marca: primeiras.marca, modelo: primeiras.modelo, amostras: pontos.length, rQuadrado: Number(confianca.toFixed(4)), vidaRemanescenteMeses: yAtual <= LIMIAR_INSERVIVEL ? 0 : null, dataPrevistaInservivel: yAtual <= LIMIAR_INSERVIVEL ? ordenadas[ordenadas.length - 1].observadoEm : null, previsaoDisponivel: yAtual <= LIMIAR_INSERVIVEL };
   }
-  const xAlvo = (LIMIAR_INSERVIVEL - regressao.b) / declive;
+  const xAlvo = (LIMIAR_INSERVIVEL - regressao.intercepto) / declive;
   const restante = Math.max(0, xAlvo - xAtual);
   const dataPrevista = new Date(ordenadas[ordenadas.length - 1].observadoEm.getTime() + restante * MS_POR_MES);
   return { tipoEquipamento: primeiras.tipo, marca: primeiras.marca, modelo: primeiras.modelo, amostras: pontos.length, rQuadrado: Number(confianca.toFixed(4)), vidaRemanescenteMeses: Number(restante.toFixed(2)), dataPrevistaInservivel: dataPrevista, previsaoDisponivel: true };
