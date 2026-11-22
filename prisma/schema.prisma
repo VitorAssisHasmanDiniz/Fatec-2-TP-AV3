@@ -29,7 +29,8 @@ model Usuario {
   criadoEm     DateTime     @default(now())
   atualizadoEm DateTime     @updatedAt
   registrosAuditoria RegistroAuditoria[]
-  lotesTriagemConcluida Lote[] @relation("ResponsavelTriagem")
+  lotesResponsavelTriagem Lote[] @relation("ResponsavelTriagem")
+  resultadosEficiencia ResultadoEficienciaOperacional[]
 
   @@map("usuarios")
 }
@@ -51,6 +52,7 @@ model Organizacao {
   lotes Lote[]
 
   contratoVigente    Contrato?
+  relatoriosAnaliticos RelatorioAnalitico[]
 
   @@map("organizacoes")
 }
@@ -87,15 +89,16 @@ model Lote {
   notaFiscal         String     @db.VarChar(100)
   transportadora     String     @db.VarChar(120)
   statusProcessamento StatusLote @default(RECEBIDO)
-  triagemConcluidaEm DateTime?
-  triagemResponsavelId String? @db.Uuid
   observacoes        String     @default("") @db.Text
 
   organizacao        Organizacao @relation(fields: [organizacaoId], references: [id], onDelete: Restrict)
-  triagemResponsavel Usuario? @relation("ResponsavelTriagem", fields: [triagemResponsavelId], references: [id], onDelete: SetNull)
 
   equipamentos Equipamento[]
+  triagemConcluidaEm DateTime?
+  triagemResponsavelId String? @db.Uuid
+  triagemResponsavel Usuario? @relation("ResponsavelTriagem", fields: [triagemResponsavelId], references: [id], onDelete: SetNull)
 
+  @@index([triagemResponsavelId])
   @@index([organizacaoId])
   @@index([dataEntrada])
   @@map("lotes")
@@ -147,8 +150,8 @@ model Equipamento {
 
   lote                 Lote                @relation(fields: [loteId], references: [id], onDelete: Restrict)
   historicoMovimentacao Movimentacao[]
-  registrosRecuperacao AnalyticsRecoveryRecord[]
-  historicoCondicao AnalyticsConditionObservation[]
+  registrosRecuperacao RegistroRecuperacao[]
+  observacoesCondicao ObservacaoCondicaoEquipamento[]
 
   @@index([loteId])
   @@index([statusRastreamento])
@@ -199,101 +202,104 @@ model RegistroAuditoria {
   @@map("registros_auditoria")
 }
 
-enum AnalyticsReportType {
+enum TipoRelatorioAnalitico {
   EFICIENCIA_OPERACIONAL
-  RENTABILIDADE_EQUIPAMENTO
-  VIDA_UTIL_REMANESCENTE
+  RENTABILIDADE_EQUIPAMENTOS
+  PREVISAO_VIDA_UTIL
 }
 
-model AnalyticsReport {
+model RelatorioAnalitico {
   id String @id @default(uuid()) @db.Uuid
-  type AnalyticsReportType
-  organizationId String? @db.VarChar(20)
-  generatedAt DateTime @default(now())
-  modelVersion String @db.VarChar(30)
-  parameters Json
-  summary Json?
-  operacional AnalyticsOperationalResult[]
-  rentabilidade AnalyticsProfitabilityResult[]
-  previsoes AnalyticsRemainingLifeResult[]
-  @@index([type, generatedAt])
-  @@index([organizationId, generatedAt])
-  @@map("analytics_reports")
+  tipo TipoRelatorioAnalitico
+  organizacaoId String? @db.VarChar(20)
+  geradoEm DateTime @default(now())
+  versaoModelo String @db.VarChar(30)
+  parametros Json
+  resumo Json?
+  resultadosEficiencia ResultadoEficienciaOperacional[]
+  resultadosRentabilidade ResultadoRentabilidadeEquipamento[]
+  resultadosVidaUtil ResultadoVidaUtil[]
+  organizacao Organizacao? @relation(fields: [organizacaoId], references: [id], onDelete: SetNull)
+
+  @@index([tipo, geradoEm])
+  @@index([organizacaoId, geradoEm])
+  @@map("relatorios_analiticos")
 }
 
-model AnalyticsOperationalResult {
+model ResultadoEficienciaOperacional {
   id String @id @default(uuid()) @db.Uuid
-  reportId String @db.Uuid
-  operatorId String? @db.Uuid
-  operatorName String
-  periodStart DateTime
-  periodEnd DateTime
-  lotesConcluidos Int
-  tempoMedioHoras Float?
-  tempoMedianoHoras Float?
-  desvioPadraoHoras Float?
-  detalhes Json?
-  report AnalyticsReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  @@index([reportId, periodStart])
-  @@map("analytics_operational_results")
+  relatorioId String @db.Uuid
+  operadorId String? @db.Uuid
+  nomeOperador String
+  inicioPeriodo DateTime
+  fimPeriodo DateTime
+  unidadePeriodo String @db.VarChar(15)
+  quantidadeLotes Int
+  tempoMedioHoras Float
+  tempoMedianoHoras Float
+  desvioPadraoHoras Float
+  relatorio RelatorioAnalitico @relation(fields: [relatorioId], references: [id], onDelete: Cascade)
+  operador Usuario? @relation(fields: [operadorId], references: [id], onDelete: SetNull)
+
+  @@index([relatorioId])
+  @@map("resultados_eficiencia_operacional")
 }
 
-model AnalyticsProfitabilityResult {
+model ResultadoRentabilidadeEquipamento {
   id String @id @default(uuid()) @db.Uuid
-  reportId String @db.Uuid
-  tipo TipoEquipamento
-  estadoFisico EstadoFisico
+  relatorioId String @db.Uuid
+  tipoEquipamento String
+  estadoFisico String
   marca String
   modelo String
   quantidade Int
-  valorTotal Decimal @db.Decimal(14, 2)
-  valorMedio Decimal @db.Decimal(14, 2)
-  ranking Int?
-  report AnalyticsReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  @@index([reportId, ranking])
-  @@map("analytics_profitability_results")
+  valorTotalRecuperacao Decimal @db.Decimal(14,2)
+  valorMedioRecuperacao Decimal @db.Decimal(14,2)
+  posicaoRanking Int?
+  relatorio RelatorioAnalitico @relation(fields: [relatorioId], references: [id], onDelete: Cascade)
+
+  @@index([relatorioId])
+  @@map("resultados_rentabilidade_equipamento")
 }
 
-model AnalyticsRemainingLifeResult {
+model ResultadoVidaUtil {
   id String @id @default(uuid()) @db.Uuid
-  reportId String @db.Uuid
-  tipo TipoEquipamento
+  relatorioId String @db.Uuid
+  tipoEquipamento String
   marca String
   modelo String
-  idadeAtualAnos Float?
-  vidaRemanescenteAnos Float?
-  dataPrevistaInservivel DateTime?
-  rSquared Float?
   amostras Int
-  metodo String @db.VarChar(40)
-  detalhes Json?
-  report AnalyticsReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  @@index([reportId])
-  @@map("analytics_remaining_life_results")
+  metodo String
+  rQuadrado Float?
+  vidaRemanescenteMeses Float?
+  dataPrevistaInservivel DateTime?
+  relatorio RelatorioAnalitico @relation(fields: [relatorioId], references: [id], onDelete: Cascade)
+
+  @@index([relatorioId])
+  @@map("resultados_vida_util")
 }
 
-model AnalyticsRecoveryRecord {
+model RegistroRecuperacao {
   id String @id @default(uuid()) @db.Uuid
   equipamentoId String @db.Uuid
-  valorRecuperado Decimal @db.Decimal(14, 2)
-  moeda String @default("BRL") @db.VarChar(3)
-  recuperadoEm DateTime @default(now())
-  descricao String? @db.Text
-  criadoEm DateTime @default(now())
+  registradoEm DateTime @default(now())
+  valorRecuperacao Decimal @db.Decimal(14,2)
+  observacao String @default("") @db.Text
   equipamento Equipamento @relation(fields: [equipamentoId], references: [id], onDelete: Cascade)
-  @@index([equipamentoId, recuperadoEm])
-  @@map("analytics_recovery_records")
+
+  @@index([equipamentoId, registradoEm])
+  @@map("registros_recuperacao")
 }
 
-model AnalyticsConditionObservation {
+model ObservacaoCondicaoEquipamento {
   id String @id @default(uuid()) @db.Uuid
   equipamentoId String @db.Uuid
   observadoEm DateTime @default(now())
-  indicadorCondicao Float
-  percentualDepreciacao Float?
+  indiceCondicao Float
   falhaRegistrada Boolean @default(false)
-  descricao String? @db.Text
+  observacao String @default("") @db.Text
   equipamento Equipamento @relation(fields: [equipamentoId], references: [id], onDelete: Cascade)
+
   @@index([equipamentoId, observadoEm])
-  @@map("analytics_condition_observations")
+  @@map("observacoes_condicao_equipamento")
 }
