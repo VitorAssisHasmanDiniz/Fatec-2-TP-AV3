@@ -32,6 +32,10 @@ Envie `Authorization: Bearer <token>` nas rotas protegidas. Faça login em `POST
 | `GET` | `/equipamentos?busca=...` | Pesquisa por marca, modelo ou código de barras | Administrador, gestor de almoxarifado |
 | `POST` | `/equipamentos/codigo-barras` | Gera código sequencial por tipo. Corpo: `{ "tipo": "NOTEBOOK", "sequencia": 7 }` | Administrador, gestor de almoxarifado |
 | `DELETE` | `/equipamentos/:id` | Exclui equipamento e movimentações associadas, mantendo registro da ação na auditoria | Administrador, gestor de almoxarifado |
+| `POST` | `/equipamentos/:id/recuperacao` | Registra valor recuperado (não negativo, até duas casas decimais) e observação opcional, com auditoria | Administrador, gestor de almoxarifado |
+| `GET` | `/equipamentos/:id/recuperacao` | Lista registros de recuperação em ordem decrescente de data | Administrador, gestor de almoxarifado |
+| `POST` | `/equipamentos/:id/observacoes-condicao` | Registra índice de condição entre 0 e 100, falha e observação opcionais; 100 = perfeito e 0 = inservível | Administrador, gestor de almoxarifado |
+| `GET` | `/equipamentos/:id/observacoes-condicao` | Lista observações de condição em ordem decrescente de data | Administrador, gestor de almoxarifado |
 | `GET` | `/relatorios/organizacao?organizacaoId=BR001&inicio=2026-01-01&fim=2026-12-31` | Relatório de lotes e equipamentos por organização e período | Todos os perfis autenticados |
 | `GET` | `/relatorios/status?status=AGUARDANDO_TRIAGEM` | Relatório de equipamentos por status de rastreamento | Todos os perfis autenticados |
 | `GET` | `/relatorios/financeiro?inicio=2026-01-01&fim=2026-12-31` | Relatório financeiro por período | Todos os perfis autenticados |
@@ -59,6 +63,6 @@ Execute:
 npm run seed:dados
 ```
 
-O script é idempotente: pode ser executado novamente sem duplicar os registros de demonstração. Ele cria/atualiza usuários de teste para os quatro papéis, organizações e contratos (incluindo contrato vencido), lotes em diferentes estados, equipamentos com estados físicos e rastreamentos variados, movimentações, configuração e registros de auditoria.
+O script é idempotente: pode ser executado novamente sem duplicar os registros de demonstração. Ele cria/atualiza usuários de teste para os quatro papéis, organizações e contratos (incluindo contrato vencido), lotes em diferentes estados e meses, com triagens atribuídas a operadores distintos, equipamentos com estados físicos e rastreamentos variados, movimentações, recuperações financeiras, séries históricas de condição, configuração e registros de auditoria.
 
 Logins criados: `admin.seed`, `operador.seed`, `gestor.seed` e `auditor.seed`. Todos usam a senha definida em `SEED_DADOS_SENHA` ou, como alternativa, `ADM_SENHA`. Use apenas em ambiente de desenvolvimento/testes; a execução atualiza a senha desses logins de demonstração.

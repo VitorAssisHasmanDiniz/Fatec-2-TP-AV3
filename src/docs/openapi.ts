@@ -133,6 +133,14 @@ const openapi = {
         },
         "/equipamentos/{id}/rastreamento": { get: op("Consultar histórico de rastreamento", ["Equipamentos"], { parameters: [pathId] }), patch: op("Atualizar status de rastreamento", ["Equipamentos"], { parameters: [pathId], requestBody: jsonBody({ statusRastreamento: "EM_MANUTENCAO", responsavel: "Deyverson Silva", observacao: "Enviado para reparo na São Januário Tecnologias" }) }) },
         "/equipamentos/{id}/depreciacao": { get: op("Calcular depreciação do equipamento", ["Equipamentos"], { parameters: [pathId] }) },
+        "/equipamentos/{id}/recuperacao": {
+            get: op("Listar registros de recuperação financeira", ["Equipamentos"], { parameters: [pathId] }),
+            post: op("Registrar recuperação financeira", ["Equipamentos"], { parameters: [pathId], created: true, requestBody: jsonBody({ valorRecuperacao: 125.50, observacao: "Recuperação de componentes e mão de obra." }) })
+        },
+        "/equipamentos/{id}/observacoes-condicao": {
+            get: op("Listar observações de condição do equipamento", ["Equipamentos"], { parameters: [pathId] }),
+            post: op("Registrar observação de condição (100 = perfeito; 0 = inservível)", ["Equipamentos"], { parameters: [pathId], created: true, requestBody: jsonBody({ indiceCondicao: 78, falhaRegistrada: true, observacao: "Falha intermitente identificada durante inspeção." }) })
+        },
         "/equipamentos/{id}/movimentacoes": { post: op("Registrar movimentação de equipamento", ["Equipamentos"], { parameters: [pathId], created: true, requestBody: jsonBody({ destino: "Almoxarifado Beira-Rio", responsavel: "Fernandão Silva", observacao: "Transferência para partida do Brasileirão" }) }) },
         "/equipamentos/{id}/estado-fisico": { patch: op("Atualizar estado físico do equipamento", ["Equipamentos"], { parameters: [pathId], requestBody: jsonBody({ estadoFisico: "BOM_ESTADO", justificativa: "Inspeção pós-jogo concluída no Couto Pereira", responsavel: "Alex de Souza" }) }) },
         "/configuracao": {

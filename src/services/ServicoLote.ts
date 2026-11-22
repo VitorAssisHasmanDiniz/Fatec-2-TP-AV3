@@ -403,7 +403,24 @@ export default class ServicoLote {
                     await tx.movimentacao.create({ data: { equipamentoId: equipamento.id, origem: "EM_TRIAGEM", destino: "AGUARDANDO_DESMONTE", responsavel: "SISTEMA_TRIAGEM", observacao: `Triagem concluída para o lote ${id}.` } });
                 }
             }
-            const atualizado = await tx.lote.update({ where: { id }, data: { statusProcessamento: "TRIAGEM_CONCLUIDA" }, include: { organizacao: true, equipamentos: { include: { historicoMovimentacao: { orderBy: { dataHora: "desc" } } } } } });
+            const atualizado = await tx.lote.update({
+                where: { id },
+                data: {
+                    statusProcessamento: "TRIAGEM_CONCLUIDA",
+                    triagemConcluidaEm: new Date(),
+                    triagemResponsavelId: usuarioId
+                },
+                include: {
+                    organizacao: true,
+                    equipamentos: {
+                        include: {
+                            historicoMovimentacao: {
+                                orderBy: { dataHora: "desc" }
+                            }
+                        }
+                    }
+                }
+            });
             await tx.registroAuditoria.create({ data: { usuarioId, acao: "TRIAGEM_CONCLUIDA", entidade: "Lote", entidadeId: id, detalhes: { quantidadeEquipamentos: lote.equipamentos.length, statusAnterior: lote.statusProcessamento, statusNovo: "TRIAGEM_CONCLUIDA" } } });
             return atualizado;
         });

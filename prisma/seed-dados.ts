@@ -196,7 +196,9 @@ async function main() {
             transportadora: "Logística Verde",
             statusProcessamento: "RECEBIDO" as const,
             observacoes: "Lote de demonstração recém-recebido.",
-            dias: -2
+            dias: -2,
+            triagemConcluidaEm: null,
+            triagemResponsavelId: null
         },
         {
             id: "LOTE-2026-002",
@@ -205,7 +207,9 @@ async function main() {
             transportadora: "TransEco",
             statusProcessamento: "EM_TRIAGEM" as const,
             observacoes: "Triagem em andamento.",
-            dias: -5
+            dias: -5,
+            triagemConcluidaEm: null,
+            triagemResponsavelId: null
         },
         {
             id: "LOTE-2026-003",
@@ -214,7 +218,9 @@ async function main() {
             transportadora: "Carga Limpa",
             statusProcessamento: "TRIAGEM_CONCLUIDA" as const,
             observacoes: "Triagem concluída.",
-            dias: -12
+            dias: -100,
+            triagemConcluidaEm: new Date("2026-08-15T12:00:00.000Z"),
+            triagemResponsavelId: "10000000-0000-4000-8000-000000000002"
         },
         {
             id: "LOTE-2026-004",
@@ -223,7 +229,9 @@ async function main() {
             transportadora: "Logística Verde",
             statusProcessamento: "ENCAMINHADO" as const,
             observacoes: "Materiais encaminhados para reaproveitamento.",
-            dias: -20
+            dias: -75,
+            triagemConcluidaEm: new Date("2026-09-18T12:00:00.000Z"),
+            triagemResponsavelId: "10000000-0000-4000-8000-000000000003"
         },
         {
             id: "LOTE-2026-005",
@@ -232,7 +240,9 @@ async function main() {
             transportadora: "TransEco",
             statusProcessamento: "FINALIZADO" as const,
             observacoes: "Processamento finalizado.",
-            dias: -45
+            dias: -45,
+            triagemConcluidaEm: new Date("2026-10-22T12:00:00.000Z"),
+            triagemResponsavelId: "10000000-0000-4000-8000-000000000002"
         },
         {
             id: "LOTE-2026-006",
@@ -241,7 +251,9 @@ async function main() {
             transportadora: "Entrega Certa",
             statusProcessamento: "CANCELADO" as const,
             observacoes: "Lote cancelado para teste de relatórios.",
-            dias: -60
+            dias: -60,
+            triagemConcluidaEm: null,
+            triagemResponsavelId: null
         }
     ];
 
@@ -254,7 +266,13 @@ async function main() {
                 transportadora: lote.transportadora,
                 statusProcessamento: lote.statusProcessamento,
                 observacoes: lote.observacoes,
-                dataEntrada: diasAPartirDeHoje(lote.dias)
+                dataEntrada: diasAPartirDeHoje(lote.dias),
+                ...(lote.triagemConcluidaEm && {
+                    triagemConcluidaEm: lote.triagemConcluidaEm
+                }),
+                ...(lote.triagemResponsavelId && {
+                    triagemResponsavelId: lote.triagemResponsavelId
+                })
             },
             create: {
                 id: lote.id,
@@ -263,7 +281,13 @@ async function main() {
                 transportadora: lote.transportadora,
                 statusProcessamento: lote.statusProcessamento,
                 observacoes: lote.observacoes,
-                dataEntrada: diasAPartirDeHoje(lote.dias)
+                dataEntrada: diasAPartirDeHoje(lote.dias),
+                ...(lote.triagemConcluidaEm && {
+                    triagemConcluidaEm: lote.triagemConcluidaEm
+                }),
+                ...(lote.triagemResponsavelId && {
+                    triagemResponsavelId: lote.triagemResponsavelId
+                })
             }
         });
     }
@@ -413,6 +437,148 @@ async function main() {
         });
     }
 
+    const equipamentosPorCodigo = await prisma.equipamento.findMany({
+        where: {
+            codigoBarrasInterno: {
+                in: [
+                    "PC-26-000001",
+                    "NT-26-000002",
+                    "MN-26-000003",
+                    "SV-26-000004",
+                    "IM-26-000005",
+                    "RT-26-000006"
+                ]
+            }
+        },
+        select: {
+            id: true,
+            codigoBarrasInterno: true
+        }
+    });
+
+    function obterEquipamentoId(codigoBarrasInterno: string): string {
+        const equipamento = equipamentosPorCodigo.find(
+            (item) => item.codigoBarrasInterno === codigoBarrasInterno
+        );
+
+        if (!equipamento) {
+            throw new Error(`Equipamento ${codigoBarrasInterno} não encontrado para o seed analítico.`);
+        }
+
+        return equipamento.id;
+    }
+
+    const recuperacoes = [
+        {
+            id: "50000000-0000-4000-8000-000000000001",
+            codigo: "PC-26-000001",
+            valor: "450.00",
+            data: "2026-08-20T12:00:00.000Z",
+            observacao: "Recuperação de placa e memória."
+        },
+        {
+            id: "50000000-0000-4000-8000-000000000002",
+            codigo: "NT-26-000002",
+            valor: "720.50",
+            data: "2026-09-12T12:00:00.000Z",
+            observacao: "Substituição de tela e bateria."
+        },
+        {
+            id: "50000000-0000-4000-8000-000000000003",
+            codigo: "SV-26-000004",
+            valor: "1850.00",
+            data: "2026-10-05T12:00:00.000Z",
+            observacao: "Recuperação de fontes redundantes."
+        },
+        {
+            id: "50000000-0000-4000-8000-000000000004",
+            codigo: "RT-26-000006",
+            valor: "95.75",
+            data: "2026-11-02T12:00:00.000Z",
+            observacao: "Reparo de conectores e firmware."
+        },
+        {
+            id: "50000000-0000-4000-8000-000000000005",
+            codigo: "IM-26-000005",
+            valor: "210.00",
+            data: "2026-10-18T12:00:00.000Z",
+            observacao: "Recuperação do conjunto de alimentação."
+        }
+    ];
+
+    for (const recuperacao of recuperacoes) {
+        const equipamentoId = obterEquipamentoId(recuperacao.codigo);
+
+        await prisma.registroRecuperacao.upsert({
+            where: { id: recuperacao.id },
+            update: {
+                equipamentoId,
+                valorRecuperacao: recuperacao.valor,
+                registradoEm: new Date(recuperacao.data),
+                observacao: recuperacao.observacao
+            },
+            create: {
+                id: recuperacao.id,
+                equipamentoId,
+                valorRecuperacao: recuperacao.valor,
+                registradoEm: new Date(recuperacao.data),
+                observacao: recuperacao.observacao
+            }
+        });
+    }
+
+    const seriesCondicao: {
+        codigo: string;
+        observacoes: [string, number, boolean, string][];
+    }[] = [
+        {
+            codigo: "PC-26-000001",
+            observacoes: [
+                ["2026-07-01T12:00:00.000Z", 96, false, "Condição inicial estável."],
+                ["2026-08-01T12:00:00.000Z", 88, false, "Desgaste leve identificado."],
+                ["2026-09-01T12:00:00.000Z", 76, true, "Falha intermitente na memória."],
+                ["2026-10-01T12:00:00.000Z", 63, true, "Falha recorrente registrada."]
+            ]
+        },
+        {
+            codigo: "NT-26-000002",
+            observacoes: [
+                ["2026-07-05T12:00:00.000Z", 92, false, "Condição geral boa."],
+                ["2026-08-05T12:00:00.000Z", 84, false, "Bateria com autonomia reduzida."],
+                ["2026-09-05T12:00:00.000Z", 71, true, "Falha na dobradiça identificada."],
+                ["2026-10-05T12:00:00.000Z", 58, true, "Trinca estrutural evoluiu."]
+            ]
+        }
+    ];
+
+    let indiceObservacao = 1;
+    for (const serie of seriesCondicao) {
+        const equipamentoId = obterEquipamentoId(serie.codigo);
+
+        for (const [data, indice, falha, observacao] of serie.observacoes) {
+            const id = `60000000-0000-4000-8000-${String(indiceObservacao).padStart(12, "0")}`;
+            await prisma.observacaoCondicaoEquipamento.upsert({
+                where: { id },
+                update: {
+                    equipamentoId,
+                    observadoEm: new Date(data),
+                    indiceCondicao: indice,
+                    falhaRegistrada: falha,
+                    observacao
+                },
+                create: {
+                    id,
+                    equipamentoId,
+                    observadoEm: new Date(data),
+                    indiceCondicao: indice,
+                    falhaRegistrada: falha,
+                    observacao
+                }
+            });
+            indiceObservacao += 1;
+        }
+    }
+
     await prisma.configuracao.upsert({
         where: { id: 1 },
         update: {
@@ -475,7 +641,7 @@ async function main() {
 
     console.log("Seed de dados concluído com sucesso.");
     console.log(
-        "Entidades: usuários, organizações, contratos, lotes, equipamentos, movimentações, configuração e auditoria."
+        "Entidades: usuários, organizações, contratos, lotes, equipamentos, movimentações, recuperações, observações de condição, configuração e auditoria."
     );
     console.log(
         "Logins de teste: admin.seed, operador.seed, gestor.seed, auditor.seed"

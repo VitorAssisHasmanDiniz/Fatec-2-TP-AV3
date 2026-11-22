@@ -601,6 +601,125 @@ export default class ServicoEquipamento {
         });
     }
 
+    async registrarRecuperacao(
+        id: string,
+        valorRecuperacao: number,
+        observacao = "",
+        usuarioId: string | null = null
+    ) {
+        return prisma.$transaction(async (tx) => {
+            const equipamento = await tx.equipamento.findUnique({
+                where: { id },
+                select: { id: true, codigoBarrasInterno: true }
+            });
+
+            if (!equipamento) {
+                throw new AppError("Equipamento não encontrado.", 404, "EQUIPAMENTO_NAO_ENCONTRADO");
+            }
+
+            const registro = await tx.registroRecuperacao.create({
+                data: {
+                    equipamentoId: id,
+                    valorRecuperacao: valorRecuperacao.toFixed(2),
+                    observacao: observacao.trim()
+                }
+            });
+
+            await tx.registroAuditoria.create({
+                data: {
+                    usuarioId,
+                    acao: "REGISTRAR_RECUPERACAO",
+                    entidade: "RegistroRecuperacao",
+                    entidadeId: registro.id,
+                    detalhes: {
+                        equipamentoId: id,
+                        codigoBarrasInterno: equipamento.codigoBarrasInterno,
+                        valorRecuperacao: valorRecuperacao.toFixed(2)
+                    }
+                }
+            });
+
+            return registro;
+        });
+    }
+
+    async listarRecuperacoes(id: string) {
+        const equipamento = await prisma.equipamento.findUnique({
+            where: { id },
+            select: { id: true }
+        });
+
+        if (!equipamento) {
+            throw new AppError("Equipamento não encontrado.", 404, "EQUIPAMENTO_NAO_ENCONTRADO");
+        }
+
+        return prisma.registroRecuperacao.findMany({
+            where: { equipamentoId: id },
+            orderBy: { registradoEm: "desc" }
+        });
+    }
+
+    async registrarObservacaoCondicao(
+        id: string,
+        indiceCondicao: number,
+        falhaRegistrada = false,
+        observacao = "",
+        usuarioId: string | null = null
+    ) {
+        return prisma.$transaction(async (tx) => {
+            const equipamento = await tx.equipamento.findUnique({
+                where: { id },
+                select: { id: true, codigoBarrasInterno: true }
+            });
+
+            if (!equipamento) {
+                throw new AppError("Equipamento não encontrado.", 404, "EQUIPAMENTO_NAO_ENCONTRADO");
+            }
+
+            const registro = await tx.observacaoCondicaoEquipamento.create({
+                data: {
+                    equipamentoId: id,
+                    indiceCondicao,
+                    falhaRegistrada,
+                    observacao: observacao.trim()
+                }
+            });
+
+            await tx.registroAuditoria.create({
+                data: {
+                    usuarioId,
+                    acao: "REGISTRAR_OBSERVACAO_CONDICAO",
+                    entidade: "ObservacaoCondicaoEquipamento",
+                    entidadeId: registro.id,
+                    detalhes: {
+                        equipamentoId: id,
+                        codigoBarrasInterno: equipamento.codigoBarrasInterno,
+                        indiceCondicao,
+                        falhaRegistrada
+                    }
+                }
+            });
+
+            return registro;
+        });
+    }
+
+    async listarObservacoesCondicao(id: string) {
+        const equipamento = await prisma.equipamento.findUnique({
+            where: { id },
+            select: { id: true }
+        });
+
+        if (!equipamento) {
+            throw new AppError("Equipamento não encontrado.", 404, "EQUIPAMENTO_NAO_ENCONTRADO");
+        }
+
+        return prisma.observacaoCondicaoEquipamento.findMany({
+            where: { equipamentoId: id },
+            orderBy: { observadoEm: "desc" }
+        });
+    }
+
     calcularDepreciacao(
         anoFabricacao: number,
         coeficiente = 0.1

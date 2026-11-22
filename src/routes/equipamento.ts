@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { z } from "zod";
 import {
     EstadoFisico,
     StatusRastreamento,
@@ -16,6 +17,21 @@ const router = Router();
 const servico = new ServicoEquipamento();
 
 router.use(autenticar);
+
+const esquemaRecuperacao = z.object({
+    valorRecuperacao: z.number().finite().nonnegative().refine(
+        (valor) => Math.abs(valor * 100 - Math.round(valor * 100)) < 0.0000001,
+        "O valor deve ter no máximo duas casas decimais."
+    ),
+    observacao: z.string().optional()
+}).strict();
+
+const esquemaObservacaoCondicao = z.object({
+    indiceCondicao: z.number().finite().min(0).max(100),
+    falhaRegistrada: z.boolean().optional(),
+    observacao: z.string().optional()
+}).strict();
+
 
 function validarObjeto(
     valor: unknown
@@ -73,6 +89,95 @@ router.post("/codigo-barras", autorizar("ADMINISTRADOR", "GESTOR_ALMOXARIFADO"),
         return res.status(200).json({ nivel: "SUCESSO", mensagem: "Código de barras gerado com sucesso.", dados: { tipo, sequencia, codigoBarrasInterno: codigo } });
     } catch (erro) { next(erro); }
 });
+
+// Recuperações financeiras do equipamento
+router.post(
+    "/:id/recuperacao",
+    autorizar("ADMINISTRADOR", "GESTOR_ALMOXARIFADO"),
+    async (req: Request, res: Response) => {
+        const id = obterId(req, res);
+        if (id === null) return;
+
+        const validacao = esquemaRecuperacao.safeParse(req.body);
+        if (!validacao.success) {
+            return responderErroEntrada(res, validacao.error.issues.map((item) => item.message).join(" "));
+        }
+
+        const registro = await servico.registrarRecuperacao(
+            id,
+            validacao.data.valorRecuperacao,
+            validacao.data.observacao ?? "",
+            obterUsuarioId(req)
+        );
+
+        return res.status(201).json({
+            nivel: "SUCESSO",
+            mensagem: "Recuperação registrada com sucesso.",
+            dados: registro
+        });
+    }
+);
+
+router.get(
+    "/:id/recuperacao",
+    autorizar("ADMINISTRADOR", "GESTOR_ALMOXARIFADO"),
+    async (req: Request, res: Response) => {
+        const id = obterId(req, res);
+        if (id === null) return;
+
+        const registros = await servico.listarRecuperacoes(id);
+        return res.status(200).json({
+            nivel: "SUCESSO",
+            mensagem: "Recuperações consultadas com sucesso.",
+            dados: registros
+        });
+    }
+);
+
+// Escala: 100 = perfeito; 0 = inservível.
+router.post(
+    "/:id/observacoes-condicao",
+    autorizar("ADMINISTRADOR", "GESTOR_ALMOXARIFADO"),
+    async (req: Request, res: Response) => {
+        const id = obterId(req, res);
+        if (id === null) return;
+
+        const validacao = esquemaObservacaoCondicao.safeParse(req.body);
+        if (!validacao.success) {
+            return responderErroEntrada(res, validacao.error.issues.map((item) => item.message).join(" "));
+        }
+
+        const registro = await servico.registrarObservacaoCondicao(
+            id,
+            validacao.data.indiceCondicao,
+            validacao.data.falhaRegistrada ?? false,
+            validacao.data.observacao ?? "",
+            obterUsuarioId(req)
+        );
+
+        return res.status(201).json({
+            nivel: "SUCESSO",
+            mensagem: "Observação de condição registrada com sucesso.",
+            dados: registro
+        });
+    }
+);
+
+router.get(
+    "/:id/observacoes-condicao",
+    autorizar("ADMINISTRADOR", "GESTOR_ALMOXARIFADO"),
+    async (req: Request, res: Response) => {
+        const id = obterId(req, res);
+        if (id === null) return;
+
+        const registros = await servico.listarObservacoesCondicao(id);
+        return res.status(200).json({
+            nivel: "SUCESSO",
+            mensagem: "Observações de condição consultadas com sucesso.",
+            dados: registros
+        });
+    }
+);
 
 // Listar equipamentos
 router.get(
