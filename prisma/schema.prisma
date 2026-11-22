@@ -238,6 +238,7 @@ model ResultadoEficienciaOperacional {
   tempoMedioHoras Float
   tempoMedianoHoras Float
   desvioPadraoHoras Float
+  gargalo Boolean @default(false)
   relatorio RelatorioAnalitico @relation(fields: [relatorioId], references: [id], onDelete: Cascade)
   operador Usuario? @relation(fields: [operadorId], references: [id], onDelete: SetNull)
 

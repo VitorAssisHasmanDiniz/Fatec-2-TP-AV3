@@ -1,6 +1,23 @@
 import { prisma } from "../../lib/prisma.js";
 import { TipoRelatorioAnalitico } from "../../../generated/prisma/client.js";
 
+const selecaoResultadosEficiencia = {
+    select: {
+        id: true,
+        relatorioId: true,
+        operadorId: true,
+        nomeOperador: true,
+        inicioPeriodo: true,
+        fimPeriodo: true,
+        unidadePeriodo: true,
+        quantidadeLotes: true,
+        tempoMedioHoras: true,
+        tempoMedianoHoras: true,
+        desvioPadraoHoras: true,
+        gargalo: true,
+    },
+} as const;
+
 export interface FiltrosHistoricoRelatorios {
     tipo?: TipoRelatorioAnalitico;
     organizacaoId?: string;
@@ -24,7 +41,7 @@ export async function obterHistoricoRelatorios(filtros: FiltrosHistoricoRelatori
         orderBy: { geradoEm: "desc" },
         take: filtros.limite ?? 20,
         include: {
-            resultadosEficiencia: true,
+            resultadosEficiencia: selecaoResultadosEficiencia,
             resultadosRentabilidade: true,
             resultadosVidaUtil: true,
         },
@@ -35,7 +52,7 @@ export async function obterRelatorioPorId(id: string) {
     return prisma.relatorioAnalitico.findUnique({
         where: { id },
         include: {
-            resultadosEficiencia: true,
+            resultadosEficiencia: selecaoResultadosEficiencia,
             resultadosRentabilidade: true,
             resultadosVidaUtil: true,
         },
