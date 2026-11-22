@@ -1,11 +1,13 @@
 import "dotenv/config";
 import app from "./app.js";
 import { prisma } from "./lib/prisma.js";
+import { iniciarAgendamentosAnaliticos, pararAgendamentosAnaliticos } from "./modules/analytics/servicosAgendamento.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 
 const server = app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
+    iniciarAgendamentosAnaliticos();
 });
 
 let encerrando = false;
@@ -22,6 +24,7 @@ async function encerrarServidor(sinal: string) {
     }, 10000);
 
     try {
+        await pararAgendamentosAnaliticos();
         await new Promise<void>((resolve, reject) => {
             server.close((erro) => {
                 if (erro) reject(erro);

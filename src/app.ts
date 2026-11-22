@@ -17,6 +17,7 @@ import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import openapi from "./docs/openapi.js";
+import { analyticsRouter } from "./modules/analytics/rotas.js";
 
 const app = express();
 
@@ -104,6 +105,8 @@ app.use("/auditoria", auditoriaRouter);
 app.use("/contratos", contratosRouter);
 
 app.use("/relatorios", relatoriosRouter);
+
+app.use("/api/v1/internal/analytics", analyticsRouter);
 
 app.use((_req, _res, next) => {
     next(new AppError("Rota não encontrada", 404, "ROTA_NAO_ENCONTRADA"));
