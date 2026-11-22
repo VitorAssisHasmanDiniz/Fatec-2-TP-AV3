@@ -29,6 +29,7 @@ model Usuario {
   criadoEm     DateTime     @default(now())
   atualizadoEm DateTime     @updatedAt
   registrosAuditoria RegistroAuditoria[]
+  lotesTriagemConcluida Lote[] @relation("ResponsavelTriagem")
 
   @@map("usuarios")
 }
@@ -86,9 +87,12 @@ model Lote {
   notaFiscal         String     @db.VarChar(100)
   transportadora     String     @db.VarChar(120)
   statusProcessamento StatusLote @default(RECEBIDO)
+  triagemConcluidaEm DateTime?
+  triagemResponsavelId String? @db.Uuid
   observacoes        String     @default("") @db.Text
 
   organizacao        Organizacao @relation(fields: [organizacaoId], references: [id], onDelete: Restrict)
+  triagemResponsavel Usuario? @relation("ResponsavelTriagem", fields: [triagemResponsavelId], references: [id], onDelete: SetNull)
 
   equipamentos Equipamento[]
 
@@ -143,6 +147,8 @@ model Equipamento {
 
   lote                 Lote                @relation(fields: [loteId], references: [id], onDelete: Restrict)
   historicoMovimentacao Movimentacao[]
+  registrosRecuperacao AnalyticsRecoveryRecord[]
+  historicoCondicao AnalyticsConditionObservation[]
 
   @@index([loteId])
   @@index([statusRastreamento])
@@ -191,4 +197,103 @@ model RegistroAuditoria {
   @@index([entidade, entidadeId])
   @@index([criadoEm])
   @@map("registros_auditoria")
+}
+
+enum AnalyticsReportType {
+  EFICIENCIA_OPERACIONAL
+  RENTABILIDADE_EQUIPAMENTO
+  VIDA_UTIL_REMANESCENTE
+}
+
+model AnalyticsReport {
+  id String @id @default(uuid()) @db.Uuid
+  type AnalyticsReportType
+  organizationId String? @db.VarChar(20)
+  generatedAt DateTime @default(now())
+  modelVersion String @db.VarChar(30)
+  parameters Json
+  summary Json?
+  operacional AnalyticsOperationalResult[]
+  rentabilidade AnalyticsProfitabilityResult[]
+  previsoes AnalyticsRemainingLifeResult[]
+  @@index([type, generatedAt])
+  @@index([organizationId, generatedAt])
+  @@map("analytics_reports")
+}
+
+model AnalyticsOperationalResult {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  operatorId String? @db.Uuid
+  operatorName String
+  periodStart DateTime
+  periodEnd DateTime
+  lotesConcluidos Int
+  tempoMedioHoras Float?
+  tempoMedianoHoras Float?
+  desvioPadraoHoras Float?
+  detalhes Json?
+  report AnalyticsReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  @@index([reportId, periodStart])
+  @@map("analytics_operational_results")
+}
+
+model AnalyticsProfitabilityResult {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  tipo TipoEquipamento
+  estadoFisico EstadoFisico
+  marca String
+  modelo String
+  quantidade Int
+  valorTotal Decimal @db.Decimal(14, 2)
+  valorMedio Decimal @db.Decimal(14, 2)
+  ranking Int?
+  report AnalyticsReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  @@index([reportId, ranking])
+  @@map("analytics_profitability_results")
+}
+
+model AnalyticsRemainingLifeResult {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  tipo TipoEquipamento
+  marca String
+  modelo String
+  idadeAtualAnos Float?
+  vidaRemanescenteAnos Float?
+  dataPrevistaInservivel DateTime?
+  rSquared Float?
+  amostras Int
+  metodo String @db.VarChar(40)
+  detalhes Json?
+  report AnalyticsReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  @@index([reportId])
+  @@map("analytics_remaining_life_results")
+}
+
+model AnalyticsRecoveryRecord {
+  id String @id @default(uuid()) @db.Uuid
+  equipamentoId String @db.Uuid
+  valorRecuperado Decimal @db.Decimal(14, 2)
+  moeda String @default("BRL") @db.VarChar(3)
+  recuperadoEm DateTime @default(now())
+  descricao String? @db.Text
+  criadoEm DateTime @default(now())
+  equipamento Equipamento @relation(fields: [equipamentoId], references: [id], onDelete: Cascade)
+  @@index([equipamentoId, recuperadoEm])
+  @@map("analytics_recovery_records")
+}
+
+model AnalyticsConditionObservation {
+  id String @id @default(uuid()) @db.Uuid
+  equipamentoId String @db.Uuid
+  observadoEm DateTime @default(now())
+  indicadorCondicao Float
+  percentualDepreciacao Float?
+  falhaRegistrada Boolean @default(false)
+  descricao String? @db.Text
+  equipamento Equipamento @relation(fields: [equipamentoId], references: [id], onDelete: Cascade)
+  @@index([equipamentoId, observadoEm])
+  @@map("analytics_condition_observations")
 }
