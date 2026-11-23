@@ -1,43 +1,92 @@
 import { prisma } from "../../lib/prisma.js";
+import {
+    executarAnaliseEficienciaOperacional,
+    executarAnaliseRentabilidadeEquipamentos,
+    executarPrevisaoVidaUtil,
+} from "../analytics/index.js";
+import { gravarArquivoRelatorio } from "./gravador.js";
 
 export const NOME_FILA_RELATORIOS = "relatorios";
 
-interface ResultadoAnaliseSimulada {
-    simulada: true;
-    tipo: string;
-    organizacaoId: string;
-    parametros: unknown;
-    processadoEm: string;
+function ehObjeto(valor: unknown): valor is Record<string, unknown> {
+    return typeof valor === "object" && valor !== null && !Array.isArray(valor);
 }
 
-function executarAnaliseSimulada(
+function converterData(valor: unknown, nomeCampo: string): Date | undefined {
+    if (valor === undefined || valor === null || valor === "") {
+        return undefined;
+    }
+
+    if (typeof valor !== "string") {
+        throw new Error(`O parâmetro ${nomeCampo} deve ser uma data em texto.`);
+    }
+
+    const data = new Date(valor);
+    if (Number.isNaN(data.getTime())) {
+        throw new Error(`O parâmetro ${nomeCampo} contém uma data inválida.`);
+    }
+
+    return data;
+}
+
+async function executarAnalise(
     tipo: string,
     organizacaoId: string,
-    parametros: unknown
-): ResultadoAnaliseSimulada {
-    return {
-        simulada: true,
-        tipo,
-        organizacaoId,
-        parametros,
-        processadoEm: new Date().toISOString()
-    };
+    parametrosOriginais: unknown,
+): Promise<unknown> {
+    const parametros = ehObjeto(parametrosOriginais) ? parametrosOriginais : {};
+    const dataInicio = converterData(parametros.dataInicio, "dataInicio");
+    const dataFim = converterData(parametros.dataFim, "dataFim");
+
+    switch (tipo) {
+        case "EFICIENCIA_OPERACIONAL": {
+            const unidadePeriodo = parametros.unidadePeriodo;
+            if (unidadePeriodo !== undefined
+                && unidadePeriodo !== "MES"
+                && unidadePeriodo !== "TRIMESTRE") {
+                throw new Error("O parâmetro unidadePeriodo deve ser MES ou TRIMESTRE.");
+            }
+
+            return executarAnaliseEficienciaOperacional({
+                organizacaoId,
+                ...(dataInicio ? { dataInicio } : {}),
+                ...(dataFim ? { dataFim } : {}),
+                ...(unidadePeriodo ? { unidadePeriodo } : {}),
+            });
+        }
+        case "RENTABILIDADE_EQUIPAMENTOS":
+            return executarAnaliseRentabilidadeEquipamentos({
+                organizacaoId,
+                ...(dataInicio ? { dataInicio } : {}),
+                ...(dataFim ? { dataFim } : {}),
+            });
+        case "PREVISAO_VIDA_UTIL": {
+            const minimoAmostras = parametros.minimoAmostras;
+            if (minimoAmostras !== undefined
+                && (typeof minimoAmostras !== "number" || !Number.isInteger(minimoAmostras))) {
+                throw new Error("O parâmetro minimoAmostras deve ser um número inteiro.");
+            }
+
+            return executarPrevisaoVidaUtil({
+                organizacaoId,
+                ...(typeof minimoAmostras === "number" ? { minimoAmostras } : {}),
+            });
+        }
+        default:
+            throw new Error(`Tipo de relatório não suportado: ${tipo}.`);
+    }
 }
 
 export async function processarTarefaRelatorio(tarefaId: string): Promise<void> {
     const tarefa = await prisma.tarefaRelatorio.findUnique({
-        where: { id: tarefaId }
+        where: { id: tarefaId },
     });
 
     if (!tarefa) {
         throw new Error(`Tarefa de relatório ${tarefaId} não encontrada.`);
     }
 
-    if (tarefa.status === "CONCLUIDA") {
-        return;
-    }
-
-    if (tarefa.status === "FALHOU") {
+    if (tarefa.status === "CONCLUIDA" || tarefa.status === "FALHOU") {
         return;
     }
 
@@ -49,30 +98,29 @@ export async function processarTarefaRelatorio(tarefaId: string): Promise<void> 
                 progresso: 10,
                 iniciadoEm: tarefa.iniciadoEm ?? new Date(),
                 tentativas: { increment: 1 },
-                erro: null
-            }
+                erro: null,
+            },
         });
 
-        await prisma.tarefaRelatorio.update({
-            where: { id: tarefa.id },
-            data: { progresso: 40 }
-        });
-
-        const resultado = executarAnaliseSimulada(
+        const resultado = await executarAnalise(
             tarefa.tipo,
             tarefa.organizacaoId,
-            tarefa.parametros
+            tarefa.parametros,
         );
-
-        // A persistência do resultado e a geração do arquivo serão adicionadas
-        // nas próximas etapas. Aqui validamos o ciclo da fila e do worker.
-        if (!resultado.simulada) {
-            throw new Error("Não foi possível executar a análise simulada.");
-        }
 
         await prisma.tarefaRelatorio.update({
             where: { id: tarefa.id },
-            data: { progresso: 85 }
+            data: { progresso: 75 },
+        });
+
+        if (!ehObjeto(resultado) || typeof resultado.relatorioId !== "string") {
+            throw new Error("A análise não retornou um identificador de relatório válido.");
+        }
+
+        const arquivo = await gravarArquivoRelatorio({
+            tarefaId: tarefa.id,
+            formato: tarefa.formato,
+            resultado,
         });
 
         await prisma.tarefaRelatorio.update({
@@ -80,8 +128,11 @@ export async function processarTarefaRelatorio(tarefaId: string): Promise<void> 
             data: {
                 status: "CONCLUIDA",
                 progresso: 100,
-                concluidoEm: new Date()
-            }
+                relatorioAnaliticoId: resultado.relatorioId,
+                caminhoArquivo: arquivo.caminho,
+                tamanhoBytes: arquivo.tamanhoBytes,
+                concluidoEm: new Date(),
+            },
         });
     } catch (erro) {
         const mensagem = erro instanceof Error
@@ -93,8 +144,8 @@ export async function processarTarefaRelatorio(tarefaId: string): Promise<void> 
             data: {
                 status: "FALHOU",
                 erro: mensagem,
-                concluidoEm: new Date()
-            }
+                concluidoEm: new Date(),
+            },
         });
 
         throw erro;
