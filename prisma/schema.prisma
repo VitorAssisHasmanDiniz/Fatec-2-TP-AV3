@@ -55,6 +55,7 @@ model Organizacao {
   contratoVigente    Contrato?
   relatoriosAnaliticos RelatorioAnalitico[]
   chavesApi ChaveApi[]
+  tarefasRelatorios TarefaRelatorio[]
 
   @@map("organizacoes")
 }
@@ -220,6 +221,7 @@ model RelatorioAnalitico {
   resumo Json?
   resultadosEficiencia ResultadoEficienciaOperacional[]
   chavesApiCriadas ChaveApi[]
+  tarefasRelatorios TarefaRelatorio[]
   resultadosRentabilidade ResultadoRentabilidadeEquipamento[]
   resultadosVidaUtil ResultadoVidaUtil[]
   organizacao Organizacao? @relation(fields: [organizacaoId], references: [id], onDelete: SetNull)
@@ -339,9 +341,53 @@ model ChaveApi {
   ultimoUsoEm      DateTime?
   criadoPorId      String         @db.Uuid
   organizacao       Organizacao   @relation(fields: [organizacaoId], references: [id], onDelete: Restrict)
+  tarefasRelatorios TarefaRelatorio[]
   criadoPor         Usuario       @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
 
   @@index([organizacaoId])
   @@index([status])
   @@map("chaves_api")
+}
+
+
+enum FormatoTarefaRelatorio {
+  CSV
+  JSON
+}
+
+enum StatusTarefaRelatorio {
+  NA_FILA
+  EM_EXECUCAO
+  CONCLUIDA
+  FALHOU
+}
+
+model TarefaRelatorio {
+  id                    String                    @id @default(uuid()) @db.Uuid
+  organizacaoId         String                    @db.VarChar(20)
+  chaveApiId            String                    @db.Uuid
+  tipo                  TipoRelatorioAnalitico
+  parametros            Json
+  formato               FormatoTarefaRelatorio
+  status                StatusTarefaRelatorio     @default(NA_FILA)
+  progresso             Int                       @default(0)
+  relatorioAnaliticoId  String?                   @db.Uuid
+  caminhoArquivo        String?                   @db.Text
+  tamanhoBytes          BigInt?
+  erro                  String?                   @db.Text
+  tentativas            Int                       @default(0)
+  criadoEm              DateTime                  @default(now())
+  iniciadoEm            DateTime?
+  concluidoEm           DateTime?
+  expiraEm              DateTime?
+
+  organizacao           Organizacao               @relation(fields: [organizacaoId], references: [id], onDelete: Restrict)
+  chaveApi              ChaveApi                  @relation(fields: [chaveApiId], references: [id], onDelete: Restrict)
+  relatorioAnalitico    RelatorioAnalitico?       @relation(fields: [relatorioAnaliticoId], references: [id], onDelete: SetNull)
+
+  @@index([chaveApiId, criadoEm])
+  @@index([organizacaoId, criadoEm])
+  @@index([status, criadoEm])
+  @@index([expiraEm])
+  @@map("tarefas_relatorios")
 }

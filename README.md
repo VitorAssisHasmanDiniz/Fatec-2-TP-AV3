@@ -5,7 +5,7 @@ API REST do Greencode com Express, TypeScript, Prisma e PostgreSQL.
 ## Configuração
 
 1. Copie `.env.example` para `.env` e configure `DATABASE_URL`, `SHADOW_DATABASE_URL` e `JWT_SECRET`.
-2. Instale as dependências com `npm ci`.
+2. Instale/atualize as dependências com `npm install`.
 3. Aplique as migrações: `npx prisma migrate deploy --schema=prisma/schema.prisma`.
 4. Gere o cliente Prisma, se necessário: `npx prisma generate --schema=prisma/schema.prisma`.
 5. Crie o administrador inicial com `npm run seed:admin`.
@@ -104,3 +104,39 @@ npm run seed:dados
 O script é idempotente: pode ser executado novamente sem duplicar os registros de demonstração. Ele cria/atualiza usuários de teste para os quatro papéis, organizações e contratos (incluindo contrato vencido), lotes em diferentes estados e meses, com triagens atribuídas a operadores distintos, equipamentos com estados físicos e rastreamentos variados, movimentações, recuperações financeiras, séries históricas de condição, configuração e registros de auditoria.
 
 Logins criados: `admin.seed`, `operador.seed`, `gestor.seed` e `auditor.seed`. Todos usam a senha definida em `SEED_DADOS_SENHA` ou, como alternativa, `ADM_SENHA`. Use apenas em ambiente de desenvolvimento/testes; a execução atualiza a senha desses logins de demonstração.
+
+
+## Redis e processamento assíncrono de relatórios
+
+O processamento em segundo plano usa Redis como transporte da fila BullMQ. O PostgreSQL permanece como fonte de verdade para status, progresso e metadados das tarefas. Os arquivos gerados ficam em `storage/relatorios` por padrão e não são versionados.
+
+### Configuração no Windows 10 ou superior
+
+1. Instale o Docker Desktop e habilite a integração com WSL2 em **Settings → Resources → WSL Integration**.
+2. Abra o terminal na pasta do projeto (PowerShell, Windows Terminal ou terminal do WSL2).
+3. Copie `.env.example` para `.env` e configure `DATABASE_URL`, `SHADOW_DATABASE_URL`, `JWT_SECRET` e `REDIS_URL`.
+4. Instale/atualize as dependências com `npm install`.
+5. Inicie o Redis com `npm run redis:up`.
+6. Confira a saúde do serviço com `docker compose ps`. O Redis deve aparecer como `healthy`.
+7. Aplique as migrations e gere o cliente Prisma:
+   `npx prisma migrate deploy --schema=prisma/schema.prisma`
+   `npx prisma generate --schema=prisma/schema.prisma`
+
+### Configuração no Ubuntu 24.04
+
+Com Docker Engine e o plugin Compose instalados:
+
+1. Na pasta do projeto, copie `.env.example` para `.env` e configure as variáveis necessárias.
+2. Instale/atualize as dependências com `npm install`.
+3. Inicie o Redis com `npm run redis:up`.
+4. Confira o serviço com `docker compose ps` e aguarde o estado `healthy`.
+5. Aplique as migrations e gere o cliente Prisma:
+   `npx prisma migrate deploy --schema=prisma/schema.prisma`
+   `npx prisma generate --schema=prisma/schema.prisma`
+
+Alternativamente, é possível instalar o Redis diretamente no Ubuntu com `sudo apt update && sudo apt install redis-server`, iniciar com `sudo systemctl enable --now redis-server` e ajustar `REDIS_URL` para `redis://localhost:6379`. Nesse modo, a persistência e a política de serviço ficam sob responsabilidade da instalação local, não do `docker-compose.yml`.
+
+### Comandos do worker
+
+- `npm run worker`: executa o worker TypeScript em desenvolvimento com `tsx`.
+- `npm run worker:start`: executa a versão compilada em `dist/src/worker.js` após `npm run build`.

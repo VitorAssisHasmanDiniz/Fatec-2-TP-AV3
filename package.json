@@ -10,7 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test:analytics": "tsx --test tests/analytics.test.ts",
     "seed:dados": "tsx prisma/seed-dados.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "redis:up": "docker compose up -d redis",
+    "worker": "tsx src/worker.ts",
+    "worker:start": "node dist/src/worker.js"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
@@ -26,7 +29,9 @@
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
     "simple-statistics": "^7.8.8",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "bullmq": "^5.71.0",
+    "ioredis": "^5.8.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
