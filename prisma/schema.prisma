@@ -220,7 +220,6 @@ model RelatorioAnalitico {
   parametros Json
   resumo Json?
   resultadosEficiencia ResultadoEficienciaOperacional[]
-  chavesApiCriadas ChaveApi[]
   tarefasRelatorios TarefaRelatorio[]
   resultadosRentabilidade ResultadoRentabilidadeEquipamento[]
   resultadosVidaUtil ResultadoVidaUtil[]

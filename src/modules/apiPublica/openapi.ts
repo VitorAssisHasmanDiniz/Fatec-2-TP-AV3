@@ -11,6 +11,57 @@ const openapiPublica = {
             ApiKey: { type: "apiKey", in: "header", name: "X-API-Key", description: "Chave no formato gc_<prefixo>_<segredo>." }
         },
         schemas: {
+            SolicitacaoRelatorio: {
+                type: "object",
+                required: ["tipo"],
+                properties: {
+                    tipo: {
+                        type: "string",
+                        enum: [
+                            "EFICIENCIA_OPERACIONAL",
+                            "RENTABILIDADE_EQUIPAMENTOS",
+                            "PREVISAO_VIDA_UTIL"
+                        ]
+                    },
+                    formato: {
+                        type: "string",
+                        enum: ["JSON", "CSV"],
+                        default: "JSON"
+                    },
+                    parametros: {
+                        type: "object",
+                        description: "Parâmetros específicos do tipo de relatório (dataInicio, dataFim, unidadePeriodo ou minimoAmostras). organizacaoId é sempre inferido da chave API.",
+                        additionalProperties: true
+                    }
+                },
+                example: {
+                    tipo: "EFICIENCIA_OPERACIONAL",
+                    formato: "CSV",
+                    parametros: {
+                        dataInicio: "2026-01-01T00:00:00.000Z",
+                        dataFim: "2026-11-23T23:59:59.000Z",
+                        unidadePeriodo: "MES"
+                    }
+                }
+            },
+            TarefaRelatorio: {
+                type: "object",
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    tipo: { type: "string", enum: ["EFICIENCIA_OPERACIONAL", "RENTABILIDADE_EQUIPAMENTOS", "PREVISAO_VIDA_UTIL"] },
+                    formato: { type: "string", enum: ["CSV", "JSON"] },
+                    status: { type: "string", enum: ["NA_FILA", "EM_EXECUCAO", "CONCLUIDA", "FALHOU"] },
+                    progresso: { type: "integer", minimum: 0, maximum: 100 },
+                    relatorioAnaliticoId: { type: "string", format: "uuid", nullable: true },
+                    tamanhoBytes: { type: "integer", nullable: true },
+                    erro: { type: "string", nullable: true },
+                    tentativas: { type: "integer" },
+                    criadoEm: { type: "string", format: "date-time" },
+                    iniciadoEm: { type: "string", format: "date-time", nullable: true },
+                    concluidoEm: { type: "string", format: "date-time", nullable: true },
+                    expiraEm: { type: "string", format: "date-time", nullable: true }
+                }
+            },
             EnvelopeSucesso: {
                 type: "object",
                 properties: {
@@ -32,6 +83,102 @@ const openapiPublica = {
         }
     },
     paths: {
+        "/relatorios": {
+            post: {
+                summary: "Solicitar geração assíncrona de relatório analítico",
+                description: "Escopo exigido: reports:generate. Enfileira a tarefa e retorna 202 imediatamente. A organização é forçada pela chave API.",
+                security: [{ ApiKey: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: { $ref: "#/components/schemas/SolicitacaoRelatorio" }
+                        }
+                    }
+                },
+                responses: {
+                    "202": {
+                        description: "Tarefa enfileirada.",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/EnvelopeSucesso" },
+                                example: {
+                                    nivel: "SUCESSO",
+                                    mensagem: "Solicitação de relatório enfileirada com sucesso.",
+                                    dados: {
+                                        tarefaId: "550e8400-e29b-41d4-a716-446655440000",
+                                        statusUrl: "/api/v1/public/relatorios/550e8400-e29b-41d4-a716-446655440000"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": { description: "DADOS_INVALIDOS.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "403": { description: "ESCOPO_INSUFICIENTE.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "429": { description: "LIMITE_TAREFAS_ATIVAS ou LIMITE_EXCEDIDO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } }
+                }
+            },
+            get: {
+                summary: "Listar tarefas de relatório da chave API",
+                description: "Escopo exigido: reports:read. Retorna apenas tarefas criadas pela chave autenticada.",
+                security: [{ ApiKey: [] }],
+                parameters: [
+                    { name: "pagina", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+                    { name: "limite", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } }
+                ],
+                responses: {
+                    "200": { description: "Tarefas paginadas.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeSucesso" } } } },
+                    "400": { description: "DADOS_INVALIDOS.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "403": { description: "ESCOPO_INSUFICIENTE.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "429": { description: "LIMITE_EXCEDIDO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } }
+                }
+            }
+        },
+        "/relatorios/{id}": {
+            get: {
+                summary: "Consultar status e progresso de uma tarefa de relatório",
+                description: "Escopo exigido: reports:read. Tarefas de outra chave ou organização retornam 404.",
+                security: [{ ApiKey: [] }],
+                parameters: [
+                    { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }
+                ],
+                responses: {
+                    "200": { description: "Status atual da tarefa.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeSucesso" } } } },
+                    "400": { description: "DADOS_INVALIDOS.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "403": { description: "ESCOPO_INSUFICIENTE.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "404": { description: "TAREFA_NAO_ENCONTRADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "429": { description: "LIMITE_EXCEDIDO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } }
+                }
+            }
+        },
+        "/relatorios/{id}/download": {
+            get: {
+                summary: "Baixar arquivo do relatório concluído (CSV ou JSON)",
+                description: "Escopo exigido: reports:read. Retorna 409 se ainda não concluído e 410 se expirado.",
+                security: [{ ApiKey: [] }],
+                parameters: [
+                    { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }
+                ],
+                responses: {
+                    "200": {
+                        description: "Arquivo CSV ou JSON do relatório.",
+                        content: {
+                            "text/csv": { schema: { type: "string" } },
+                            "application/json": { schema: { type: "object" } }
+                        }
+                    },
+                    "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "403": { description: "ESCOPO_INSUFICIENTE.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "404": { description: "TAREFA_NAO_ENCONTRADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "409": { description: "RELATORIO_NAO_PRONTO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "410": { description: "RELATORIO_EXPIRADO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "429": { description: "LIMITE_EXCEDIDO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } }
+                }
+            }
+        },
         "/rastreabilidade/equipamentos/{codigoBarras}": {
             get: {
                 summary: "Consultar rastreabilidade de equipamento",

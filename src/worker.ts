@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { Worker } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import { prisma } from "./lib/prisma.js";
 import {
     NOME_FILA_RELATORIOS,
@@ -18,7 +18,7 @@ const concorrencia = Number.isFinite(concorrenciaConfigurada)
     ? concorrenciaConfigurada
     : 3;
 
-const conexaoRedis = new IORedis(urlRedis, {
+const conexaoRedis = new Redis(urlRedis, {
     maxRetriesPerRequest: null
 });
 

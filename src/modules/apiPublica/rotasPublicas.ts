@@ -8,6 +8,7 @@ import { obterContextoChaveApi, exigirChaveApi } from "./middlewareChaveApi.js";
 import { limitadorChaveApi } from "./limitadorChaveApi.js";
 import { StatusLote } from "../../../generated/prisma/client.js";
 import { middlewareVersaoApiPublica } from "./middlewareVersao.js";
+import { relatoriosFilaPublicosRouter } from "../relatoriosFila/rotasPublicas.js";
 
 const apiPublicaRouter = Router();
 export const relatoriosPublicosRouter = Router();
@@ -40,7 +41,7 @@ apiPublicaRouter.get(
             const contexto = obterContextoChaveApi(req);
             const equipamento = await prisma.equipamento.findFirst({
                 where: {
-                    codigoBarrasInterno: req.params.codigoBarras,
+                    codigoBarrasInterno: String(req.params.codigoBarras),
                     lote: { organizacaoId: contexto.organizacaoId }
                 },
                 select: {
@@ -132,7 +133,7 @@ apiPublicaRouter.get(
         try {
             const contexto = obterContextoChaveApi(req);
             const lote = await prisma.lote.findFirst({
-                where: { id: req.params.id, organizacaoId: contexto.organizacaoId },
+                where: { id: String(req.params.id), organizacaoId: contexto.organizacaoId },
                 select: {
                     id: true,
                     dataEntrada: true,
@@ -197,6 +198,7 @@ apiPublicaRouter.post(
         }
     }
 );
+relatoriosPublicosRouter.use("/", relatoriosFilaPublicosRouter);
 
 apiPublicaRouter.use("/relatorios", relatoriosPublicosRouter);
 

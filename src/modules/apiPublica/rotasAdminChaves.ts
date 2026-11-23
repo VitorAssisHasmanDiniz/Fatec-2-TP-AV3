@@ -48,7 +48,11 @@ router.post("/", async (req, res, next) => {
         const dados = esquemaCriacao.parse(req.body);
         const resultado = await servico.criar({
             ...dados,
-            expiraEm: dados.expiraEm ? new Date(dados.expiraEm) : dados.expiraEm
+            expiraEm: dados.expiraEm
+                ? new Date(dados.expiraEm)
+                : dados.expiraEm === null
+                    ? null
+                    : undefined
         }, obterUsuarioId(req as RequisicaoAutenticada));
         res.status(201).json({ nivel: "SUCESSO", mensagem: "Chave API criada", dados: resultado });
     } catch (erro) {
@@ -71,7 +75,11 @@ router.patch("/:id", async (req, res, next) => {
         const dados = esquemaAtualizacao.parse(req.body);
         const resultado = await servico.atualizar(id, {
             ...dados,
-            expiraEm: dados.expiraEm ? new Date(dados.expiraEm) : dados.expiraEm
+            expiraEm: dados.expiraEm
+                ? new Date(dados.expiraEm)
+                : dados.expiraEm === null
+                    ? null
+                    : undefined
         }, obterUsuarioId(req as RequisicaoAutenticada));
         res.json({ nivel: "SUCESSO", mensagem: "Chave API atualizada", dados: resultado });
     } catch (erro) {

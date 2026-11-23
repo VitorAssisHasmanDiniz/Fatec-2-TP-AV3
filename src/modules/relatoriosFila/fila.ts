@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { Queue } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import { NOME_FILA_RELATORIOS } from "./processador.js";
 
 export interface DadosTarefaRelatorio {
@@ -9,7 +9,7 @@ export interface DadosTarefaRelatorio {
 
 const urlRedis = process.env.REDIS_URL || "redis://localhost:6379";
 
-export const conexaoRedisFila = new IORedis(urlRedis, {
+export const conexaoRedisFila = new Redis(urlRedis, {
     maxRetriesPerRequest: null
 });
 
