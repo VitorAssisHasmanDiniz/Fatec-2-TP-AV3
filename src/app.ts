@@ -18,6 +18,7 @@ import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import openapi from "./docs/openapi.js";
 import { analyticsRouter } from "./modules/analytics/rotas.js";
+import adminChavesRouter from "./modules/apiPublica/rotasAdminChaves.js";
 
 const app = express();
 
@@ -107,6 +108,8 @@ app.use("/contratos", contratosRouter);
 app.use("/relatorios", relatoriosRouter);
 
 app.use("/api/v1/internal/analytics", analyticsRouter);
+
+app.use("/api/v1/admin/chaves-api", adminChavesRouter);
 
 app.use((_req, _res, next) => {
     next(new AppError("Rota não encontrada", 404, "ROTA_NAO_ENCONTRADA"));
