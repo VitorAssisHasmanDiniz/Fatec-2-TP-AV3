@@ -31,6 +31,7 @@ model Usuario {
   registrosAuditoria RegistroAuditoria[]
   lotesResponsavelTriagem Lote[] @relation("ResponsavelTriagem")
   resultadosEficiencia ResultadoEficienciaOperacional[]
+  chavesApiCriadas ChaveApi[]
 
   @@map("usuarios")
 }
@@ -53,6 +54,7 @@ model Organizacao {
 
   contratoVigente    Contrato?
   relatoriosAnaliticos RelatorioAnalitico[]
+  chavesApi ChaveApi[]
 
   @@map("organizacoes")
 }
@@ -217,6 +219,7 @@ model RelatorioAnalitico {
   parametros Json
   resumo Json?
   resultadosEficiencia ResultadoEficienciaOperacional[]
+  chavesApiCriadas ChaveApi[]
   resultadosRentabilidade ResultadoRentabilidadeEquipamento[]
   resultadosVidaUtil ResultadoVidaUtil[]
   organizacao Organizacao? @relation(fields: [organizacaoId], references: [id], onDelete: SetNull)
@@ -307,4 +310,38 @@ model ObservacaoCondicaoEquipamento {
 
   @@index([equipamentoId, observadoEm])
   @@map("observacoes_condicao_equipamento")
+}
+
+
+enum PlanoChaveApi {
+  BASICO
+  PROFISSIONAL
+  ENTERPRISE
+}
+
+enum StatusChaveApi {
+  ATIVA
+  REVOGADA
+}
+
+model ChaveApi {
+  id              String         @id @default(uuid()) @db.Uuid
+  nomeParceiro     String         @db.VarChar(150)
+  organizacaoId    String         @db.VarChar(20)
+  prefixo          String         @unique @db.VarChar(8)
+  hashChave        String         @unique @db.VarChar(64)
+  escopos          String[]
+  plano            PlanoChaveApi  @default(BASICO)
+  limitePorMinuto  Int            @default(60)
+  status           StatusChaveApi @default(ATIVA)
+  expiraEm         DateTime?
+  criadoEm         DateTime       @default(now())
+  ultimoUsoEm      DateTime?
+  criadoPorId      String         @db.Uuid
+  organizacao       Organizacao   @relation(fields: [organizacaoId], references: [id], onDelete: Restrict)
+  criadoPor         Usuario       @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+
+  @@index([organizacaoId])
+  @@index([status])
+  @@map("chaves_api")
 }
