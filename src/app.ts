@@ -19,6 +19,8 @@ import { prisma } from "./lib/prisma.js";
 import openapi from "./docs/openapi.js";
 import { analyticsRouter } from "./modules/analytics/rotas.js";
 import adminChavesRouter from "./modules/apiPublica/rotasAdminChaves.js";
+import { apiPublicaRouter } from "./modules/apiPublica/rotasPublicas.js";
+import openapiPublica from "./modules/apiPublica/openapi.js";
 
 const app = express();
 
@@ -110,6 +112,33 @@ app.use("/relatorios", relatoriosRouter);
 app.use("/api/v1/internal/analytics", analyticsRouter);
 
 app.use("/api/v1/admin/chaves-api", adminChavesRouter);
+
+app.get("/api/v1/public/docs.json", (_req, res) => {
+    res.json(openapiPublica);
+});
+
+app.get("/api/v1/public/docs", (_req, res) => {
+    res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' http: https:; font-src 'self' data: https://cdn.jsdelivr.net");
+    res.type("html").send(`<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Greencode API Pública — Swagger</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <style>body{margin:0}#swagger-ui{max-width:1440px;margin:auto}</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = () => SwaggerUIBundle({url:'/api/v1/public/docs.json',dom_id:'#swagger-ui',deepLinking:true,presets:[SwaggerUIBundle.presets.apis,SwaggerUIStandalonePreset],layout:'StandaloneLayout',persistAuthorization:true});
+  </script>
+</body>
+</html>`);
+});
+
+app.use("/api/v1/public", apiPublicaRouter);
 
 app.use((_req, _res, next) => {
     next(new AppError("Rota não encontrada", 404, "ROTA_NAO_ENCONTRADA"));
