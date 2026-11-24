@@ -18,6 +18,11 @@ const concorrencia = Number.isFinite(concorrenciaConfigurada)
     ? concorrenciaConfigurada
     : 3;
 
+const maxTentativasPadrao = Number.parseInt(
+    process.env.REPORT_MAX_TENTATIVAS || "3",
+    10
+);
+
 const conexaoRedis = new Redis(urlRedis, {
     maxRetriesPerRequest: null
 });
@@ -25,7 +30,14 @@ const conexaoRedis = new Redis(urlRedis, {
 const worker = new Worker<DadosTarefaRelatorio>(
     NOME_FILA_RELATORIOS,
     async (trabalho) => {
-        await processarTarefaRelatorio(trabalho.data.tarefaId);
+        const maxTentativas = typeof trabalho.opts.attempts === "number" && trabalho.opts.attempts > 0
+            ? trabalho.opts.attempts
+            : (Number.isFinite(maxTentativasPadrao) && maxTentativasPadrao > 0 ? maxTentativasPadrao : 3);
+
+        await processarTarefaRelatorio(trabalho.data.tarefaId, {
+            tentativaAtual: trabalho.attemptsMade + 1,
+            maxTentativas,
+        });
     },
     {
         connection: conexaoRedis,

@@ -1,12 +1,32 @@
+import { access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { UnrecoverableError } from "bullmq";
 import { prisma } from "../../lib/prisma.js";
+import AppError from "../../errors/AppError.js";
 import {
     executarAnaliseEficienciaOperacional,
     executarAnaliseRentabilidadeEquipamentos,
     executarPrevisaoVidaUtil,
 } from "../analytics/index.js";
+import { classificarErroProcessamento } from "./classificacaoErros.js";
 import { gravarArquivoRelatorio } from "./gravador.js";
 
 export const NOME_FILA_RELATORIOS = "relatorios";
+
+export interface ContextoExecucaoJob {
+    tentativaAtual: number;
+    maxTentativas: number;
+}
+
+function obterDiasRetencao(): number {
+    const valor = Number.parseInt(process.env.REPORT_RETENCAO_DIAS || "7", 10);
+    return Number.isFinite(valor) && valor >= 1 ? valor : 7;
+}
+
+function calcularDataExpiracao(): Date {
+    const dias = obterDiasRetencao();
+    return new Date(Date.now() + dias * 24 * 60 * 60 * 1000);
+}
 
 function ehObjeto(valor: unknown): valor is Record<string, unknown> {
     return typeof valor === "object" && valor !== null && !Array.isArray(valor);
@@ -18,15 +38,26 @@ function converterData(valor: unknown, nomeCampo: string): Date | undefined {
     }
 
     if (typeof valor !== "string") {
-        throw new Error(`O parâmetro ${nomeCampo} deve ser uma data em texto.`);
+        throw new AppError(`O parâmetro ${nomeCampo} deve ser uma data em texto.`, 400, "DADOS_INVALIDOS");
     }
 
     const data = new Date(valor);
     if (Number.isNaN(data.getTime())) {
-        throw new Error(`O parâmetro ${nomeCampo} contém uma data inválida.`);
+        throw new AppError(`O parâmetro ${nomeCampo} contém uma data inválida.`, 400, "DADOS_INVALIDOS");
     }
 
     return data;
+}
+
+async function validarOrganizacaoExistente(organizacaoId: string): Promise<void> {
+    const organizacao = await prisma.organizacao.findUnique({
+        where: { id: organizacaoId },
+        select: { id: true },
+    });
+
+    if (!organizacao) {
+        throw new AppError("Organização vinculada à tarefa não encontrada.", 404, "ORGANIZACAO_NAO_ENCONTRADA");
+    }
 }
 
 async function executarAnalise(
@@ -41,10 +72,12 @@ async function executarAnalise(
     switch (tipo) {
         case "EFICIENCIA_OPERACIONAL": {
             const unidadePeriodo = parametros.unidadePeriodo;
-            if (unidadePeriodo !== undefined
+            if (
+                unidadePeriodo !== undefined
                 && unidadePeriodo !== "MES"
-                && unidadePeriodo !== "TRIMESTRE") {
-                throw new Error("O parâmetro unidadePeriodo deve ser MES ou TRIMESTRE.");
+                && unidadePeriodo !== "TRIMESTRE"
+            ) {
+                throw new AppError("O parâmetro unidadePeriodo deve ser MES ou TRIMESTRE.", 400, "DADOS_INVALIDOS");
             }
 
             return executarAnaliseEficienciaOperacional({
@@ -62,9 +95,11 @@ async function executarAnalise(
             });
         case "PREVISAO_VIDA_UTIL": {
             const minimoAmostras = parametros.minimoAmostras;
-            if (minimoAmostras !== undefined
-                && (typeof minimoAmostras !== "number" || !Number.isInteger(minimoAmostras))) {
-                throw new Error("O parâmetro minimoAmostras deve ser um número inteiro.");
+            if (
+                minimoAmostras !== undefined
+                && (typeof minimoAmostras !== "number" || !Number.isInteger(minimoAmostras))
+            ) {
+                throw new AppError("O parâmetro minimoAmostras deve ser um número inteiro.", 400, "DADOS_INVALIDOS");
             }
 
             return executarPrevisaoVidaUtil({
@@ -73,22 +108,46 @@ async function executarAnalise(
             });
         }
         default:
-            throw new Error(`Tipo de relatório não suportado: ${tipo}.`);
+            throw new AppError(`Tipo de relatório não suportado: ${tipo}.`, 400, "TIPO_RELATORIO_INVALIDO");
     }
 }
 
-export async function processarTarefaRelatorio(tarefaId: string): Promise<void> {
+async function arquivoJaExiste(caminho: string | null): Promise<boolean> {
+    if (!caminho) {
+        return false;
+    }
+
+    try {
+        await access(caminho, fsConstants.R_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export async function processarTarefaRelatorio(
+    tarefaId: string,
+    contextoJob: ContextoExecucaoJob = { tentativaAtual: 1, maxTentativas: 1 },
+): Promise<void> {
     const tarefa = await prisma.tarefaRelatorio.findUnique({
         where: { id: tarefaId },
     });
 
     if (!tarefa) {
-        throw new Error(`Tarefa de relatório ${tarefaId} não encontrada.`);
+        throw new UnrecoverableError(`Tarefa de relatório ${tarefaId} não encontrada.`);
     }
 
-    if (tarefa.status === "CONCLUIDA" || tarefa.status === "FALHOU") {
+    // Idempotência: se já foi concluída e o arquivo existe, não reprocessa
+    if (tarefa.status === "CONCLUIDA" && await arquivoJaExiste(tarefa.caminhoArquivo)) {
         return;
     }
+
+    // Se já falhou definitivamente anteriormente, encerra sem duplicar
+    if (tarefa.status === "FALHOU") {
+        return;
+    }
+
+    const numeroTentativa = Math.max(tarefa.tentativas + 1, contextoJob.tentativaAtual);
 
     try {
         await prisma.tarefaRelatorio.update({
@@ -97,9 +156,16 @@ export async function processarTarefaRelatorio(tarefaId: string): Promise<void> 
                 status: "EM_EXECUCAO",
                 progresso: 10,
                 iniciadoEm: tarefa.iniciadoEm ?? new Date(),
-                tentativas: { increment: 1 },
+                tentativas: numeroTentativa,
                 erro: null,
             },
+        });
+
+        await validarOrganizacaoExistente(tarefa.organizacaoId);
+
+        await prisma.tarefaRelatorio.update({
+            where: { id: tarefa.id },
+            data: { progresso: 25 },
         });
 
         const resultado = await executarAnalise(
@@ -131,22 +197,41 @@ export async function processarTarefaRelatorio(tarefaId: string): Promise<void> 
                 relatorioAnaliticoId: resultado.relatorioId,
                 caminhoArquivo: arquivo.caminho,
                 tamanhoBytes: arquivo.tamanhoBytes,
+                erro: null,
                 concluidoEm: new Date(),
+                expiraEm: calcularDataExpiracao(),
             },
         });
     } catch (erro) {
-        const mensagem = erro instanceof Error
-            ? erro.message
-            : "Falha ao processar o relatório.";
+        const classificacao = classificarErroProcessamento(erro);
+        const ehPermanente = classificacao.categoria === "PERMANENTE";
+        const esgotouTentativas = numeroTentativa >= contextoJob.maxTentativas;
 
+        if (ehPermanente || esgotouTentativas) {
+            await prisma.tarefaRelatorio.update({
+                where: { id: tarefa.id },
+                data: {
+                    status: "FALHOU",
+                    erro: classificacao.mensagemSegura,
+                    concluidoEm: new Date(),
+                },
+            }).catch(() => undefined);
+
+            if (ehPermanente) {
+                throw new UnrecoverableError(classificacao.mensagemSegura);
+            }
+
+            throw erro;
+        }
+
+        // Falha transitória com tentativas restantes: mantém EM_EXECUCAO/NA_FILA para o BullMQ reexecutar
         await prisma.tarefaRelatorio.update({
             where: { id: tarefa.id },
             data: {
-                status: "FALHOU",
-                erro: mensagem,
-                concluidoEm: new Date(),
+                status: "NA_FILA",
+                erro: classificacao.mensagemSegura,
             },
-        });
+        }).catch(() => undefined);
 
         throw erro;
     }
