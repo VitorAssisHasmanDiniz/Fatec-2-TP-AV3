@@ -14,6 +14,11 @@ import {
     calcularJanelaPeriodoAnterior,
     calcularResultados,
 } from "../src/modules/analytics/funcoesAnaliticas.js";
+import { compararPrevisaoComRealizado } from "../src/modules/analytics/comparacaoVidaUtil.js";
+import {
+    obterConfiguracaoAgendamentoAnalytics,
+    validarExpressaoCron,
+} from "../src/modules/analytics/agendamentoConfig.js";
 
 test("calcula média, mediana e desvio padrão de uma amostra fixa", () => {
   const resultado = calcularResumoEstatistico([2, 4, 4, 4, 5, 5, 7, 9]);
@@ -284,7 +289,6 @@ test("agrega vidas remanescentes pela mediana e taxa de falhas do grupo", () => 
     assert.equal(resultado.previsaoDisponivel, true);
 });
 
-
 test("define vida remanescente zero quando o último índice já é inservível", () => {
     const equipamento = criarEquipamentoVidaUtil(
         "equipamento-9",
@@ -294,4 +298,47 @@ test("define vida remanescente zero quando o último índice já é inservível"
     const resultado = analisarEquipamentoVidaUtil(equipamento, 3);
 
     assert.equal(resultado.vidaRemanescenteMeses, 0);
+});
+
+test("compara previsão de vida útil com data realizada e calcula MAE em dias", () => {
+    const geradoEm = new Date("2026-01-01T00:00:00.000Z");
+    const previsto = new Date("2026-01-11T00:00:00.000Z");
+    const realizado = new Date("2026-01-16T00:00:00.000Z");
+
+    const comparacao = compararPrevisaoComRealizado(
+        "rel-1",
+        geradoEm,
+        [{
+            tipoEquipamento: "NOTEBOOK",
+            marca: "Dell",
+            modelo: "Latitude",
+            previsaoDisponivel: true,
+            dataPrevistaInservivel: previsto,
+        }],
+        [{
+            equipamentoId: "eq-1",
+            tipoEquipamento: "NOTEBOOK",
+            marca: "Dell",
+            modelo: "Latitude",
+            observadoEm: realizado,
+            indiceCondicao: 0,
+            falhaRegistrada: false,
+        }],
+    );
+
+    assert.equal(comparacao.gruposAvaliados, 1);
+    assert.equal(comparacao.gruposComRealizado, 1);
+    assert.equal(comparacao.maeDias, 5);
+});
+
+test("valida expressões cron e modo de agendador analytics", () => {
+    assert.equal(validarExpressaoCron("0 2 * * *"), true);
+    assert.equal(validarExpressaoCron("cron-invalido"), false);
+
+    const config = obterConfiguracaoAgendamentoAnalytics({
+        ANALYTICS_AGENDADOR: "worker",
+        ANALYTICS_CRON_EFICIENCIA: "0 3 * * *",
+    });
+    assert.equal(config.modo, "worker");
+    assert.equal(config.agendamentos[0]?.expressaoCron, "0 3 * * *");
 });

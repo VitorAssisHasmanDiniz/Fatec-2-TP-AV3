@@ -23,9 +23,28 @@ function neutralizarInjecaoCsv(texto: string): string {
     return texto;
 }
 
+function serializarValorBruto(valor: unknown): string {
+    if (valor === null || valor === undefined) {
+        return "";
+    }
+
+    if (valor instanceof Date) {
+        return valor.toISOString();
+    }
+
+    if (typeof valor === "object") {
+        return JSON.stringify(valor);
+    }
+
+    return String(valor);
+}
+
 function escaparCampoCsv(valor: unknown): string {
-    const texto = neutralizarInjecaoCsv(normalizarValor(valor));
-    return `"${texto.replace(/"/g, '""')}"`;
+    const bruto = serializarValorBruto(valor);
+    const seguro = typeof valor === "string"
+        ? neutralizarInjecaoCsv(bruto)
+        : bruto;
+    return `"${seguro.replace(/"/g, '""')}"`;
 }
 
 function obterRegistros(resultado: unknown): Record<string, unknown>[] {

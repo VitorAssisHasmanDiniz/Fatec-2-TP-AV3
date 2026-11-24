@@ -33,7 +33,27 @@ export default class ServicoChavesApi {
         limitePorMinuto?: number;
         expiraEm?: Date | null;
     }, criadoPorId: string) {
+        const [organizacao, usuarioCriador] = await Promise.all([
+            prisma.organizacao.findUnique({
+                where: { id: dados.organizacaoId },
+                select: { id: true },
+            }),
+            prisma.usuario.findUnique({
+                where: { id: criadoPorId },
+                select: { id: true },
+            }),
+        ]);
+
+        if (!organizacao) {
+            throw new AppError("Organização não encontrada.", 404, "ORGANIZACAO_NAO_ENCONTRADA");
+        }
+
+        if (!usuarioCriador) {
+            throw new AppError("Usuário criador não encontrado.", 404, "USUARIO_NAO_ENCONTRADO");
+        }
+
         const { chave, prefixo } = gerarChaveApi();
+        const segredoWebhook = randomBytes(32).toString("hex");
         const registro = await prisma.chaveApi.create({
             data: {
                 ...dados,
@@ -41,17 +61,18 @@ export default class ServicoChavesApi {
                 limitePorMinuto: dados.limitePorMinuto ?? 60,
                 prefixo,
                 hashChave: calcularHashChaveApi(chave),
-                criadoPorId
-            }
+                segredoWebhookHash: segredoWebhook,
+                criadoPorId,
+            },
         });
         await auditoria.registrar({
             usuarioId: criadoPorId,
             acao: "CRIAR_CHAVE_API",
             entidade: "ChaveApi",
             entidadeId: registro.id,
-            detalhes: { nomeParceiro: dados.nomeParceiro, prefixo } as Prisma.InputJsonValue
+            detalhes: { nomeParceiro: dados.nomeParceiro, prefixo } as Prisma.InputJsonValue,
         });
-        return { ...this.publico(registro), chave };
+        return { ...this.publico(registro), chave, segredoWebhook };
     }
 
     async listar() {
@@ -85,6 +106,7 @@ export default class ServicoChavesApi {
         if (!antiga) throw new AppError("Chave API não encontrada", 404, "CHAVE_NAO_ENCONTRADA");
         if (antiga.status === "REVOGADA") throw new AppError("Chave API já revogada", 409, "CHAVE_REVOGADA");
         const gerada = gerarChaveApi();
+        const segredoWebhook = randomBytes(32).toString("hex");
         const nova = await prisma.$transaction(async (tx) => {
             await tx.chaveApi.update({ where: { id }, data: { status: "REVOGADA" } });
             return tx.chaveApi.create({
@@ -93,16 +115,23 @@ export default class ServicoChavesApi {
                     organizacaoId: antiga.organizacaoId,
                     prefixo: gerada.prefixo,
                     hashChave: calcularHashChaveApi(gerada.chave),
+                    segredoWebhookHash: segredoWebhook,
                     escopos: antiga.escopos,
                     plano: antiga.plano,
                     limitePorMinuto: antiga.limitePorMinuto,
                     expiraEm: antiga.expiraEm,
-                    criadoPorId: usuarioId
-                }
+                    criadoPorId: usuarioId,
+                },
             });
         });
-        await auditoria.registrar({ usuarioId, acao: "ROTACIONAR_CHAVE_API", entidade: "ChaveApi", entidadeId: nova.id, detalhes: { chaveAnteriorId: id } });
-        return { ...this.publico(nova), chave: gerada.chave };
+        await auditoria.registrar({
+            usuarioId,
+            acao: "ROTACIONAR_CHAVE_API",
+            entidade: "ChaveApi",
+            entidadeId: nova.id,
+            detalhes: { chaveAnteriorId: id },
+        });
+        return { ...this.publico(nova), chave: gerada.chave, segredoWebhook };
     }
 
     private publico(registro: {
@@ -120,7 +149,7 @@ export default class ServicoChavesApi {
             status: registro.status,
             expiraEm: registro.expiraEm,
             criadoEm: registro.criadoEm,
-            ultimoUsoEm: registro.ultimoUsoEm
+            ultimoUsoEm: registro.ultimoUsoEm,
         };
     }
 }

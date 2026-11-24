@@ -1,3 +1,4 @@
+export const JOB_RECONCILIAR_TAREFAS = "reconciliar-tarefas-relatorio";
 import "dotenv/config";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
@@ -81,10 +82,10 @@ export async function registrarAgendamentosWorker(): Promise<void> {
     const fila = obterFilaRelatorios();
 
     await fila.upsertJobScheduler(
-        "scheduler-limpeza-relatorios-expirados",
-        { pattern: "0 * * * *" },
+        "scheduler-reconciliar-tarefas-relatorio",
+        { pattern: "*/5 * * * *" },
         {
-            name: JOB_LIMPAR_EXPIRADOS,
+            name: JOB_RECONCILIAR_TAREFAS,
             data: {},
             opts: {
                 attempts: 2,

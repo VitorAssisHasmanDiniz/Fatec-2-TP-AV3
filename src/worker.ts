@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Worker } from "bullmq";
+import { UnrecoverableError, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { prisma } from "./lib/prisma.js";
 import {
@@ -21,6 +21,8 @@ import {
     type DadosTarefaRelatorio,
 } from "./modules/relatoriosFila/fila.js";
 import { limparRelatoriosExpirados } from "./modules/relatoriosFila/limpezaExpirados.js";
+import { logger } from "./lib/logger.js";
+import { sanitizarMensagemErroPublico } from "./modules/relatoriosFila/classificacaoErros.js";
 
 const urlRedis = process.env.REDIS_URL || "redis://localhost:6379";
 const concorrenciaConfigurada = Number.parseInt(
@@ -88,13 +90,41 @@ worker.on("completed", (trabalho) => {
     console.info(`Job ${trabalho.name} (${trabalho.id}) processado.`);
 });
 
-worker.on("failed", (trabalho, erro) => {
-    console.error(
-        `Falha no job ${trabalho?.name ?? "desconhecido"} (${trabalho?.id ?? "sem-id"}):`,
-        erro.message
+worker.on("failed", async (trabalho, erro) => {
+    logger.error(
+        { err: erro, jobName: trabalho?.name, jobId: trabalho?.id },
+        "Falha definitiva ou tentativa falhada no worker.",
     );
-});
 
+    const tarefaId = trabalho?.data?.tarefaId;
+    if (!trabalho || !tarefaId) {
+        return;
+    }
+
+    const maxTentativas = typeof trabalho.opts.attempts === "number" && trabalho.opts.attempts > 0
+        ? trabalho.opts.attempts
+        : (Number.isFinite(maxTentativasPadrao) && maxTentativasPadrao > 0 ? maxTentativasPadrao : 3);
+    const ehUnrecoverable = erro instanceof UnrecoverableError || erro.name === "UnrecoverableError";
+    const esgotou = ehUnrecoverable || trabalho.attemptsMade >= maxTentativas;
+
+    if (!esgotou) {
+        return;
+    }
+
+    await prisma.tarefaRelatorio.updateMany({
+        where: {
+            id: tarefaId,
+            status: { in: ["NA_FILA", "EM_EXECUCAO"] },
+        },
+        data: {
+            status: "FALHOU",
+            erro: sanitizarMensagemErroPublico(erro),
+            concluidoEm: new Date(),
+        },
+    }).catch((erroAtualizacao: any) => {
+        logger.error({ err: erroAtualizacao, tarefaId }, "Falha ao atualizar status FALHOU no handler failed.");
+    });
+});
 worker.on("error", (erro) => {
     console.error("Erro no worker de relatórios:", erro);
 });

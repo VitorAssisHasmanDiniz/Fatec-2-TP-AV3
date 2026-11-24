@@ -1,8 +1,9 @@
+import { createHmac } from "node:crypto";
 import { fecharFilaRelatorios } from "../src/modules/relatoriosFila/fila.js";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { ZodError, z } from "zod";
 import { Redis } from "ioredis";
 import AppError from "../src/errors/AppError.js";
@@ -22,6 +23,11 @@ import {
     serializarCsv,
     serializarJson,
 } from "../src/modules/relatoriosFila/serializadores.js";
+import {
+    entregarWebhookRelatorio,
+    validarUrlWebhookSegura,
+} from "../src/modules/relatoriosFila/webhook.js";
+import { reconciliarTarefasOrfas } from "../src/modules/relatoriosFila/reconciliacao.js";
 
 async function coletar(conteudo: AsyncGenerator<string>): Promise<string> {
     let resultado = "";
@@ -122,10 +128,10 @@ test("classificação de erros distingue falhas permanentes e transitórias", ()
     assert.equal(erro500.categoria, "TRANSITORIO");
 });
 
-test("sanitização de erro oculta stack trace multi-linha", () => {
+test("sanitização de erro oculta stack trace e detalhes internos de Error genérico", () => {
     const erroComStack = new Error("Falha ao gravar arquivo\n    at Object.<anonymous> (/app/src/worker.ts:42:10)");
     const mensagem = sanitizarMensagemErroPublico(erroComStack);
-    assert.equal(mensagem, "Falha ao gravar arquivo");
+    assert.equal(mensagem, "Erro interno ao processar o relatório. Tente novamente mais tarde.");
     assert.doesNotMatch(mensagem, /worker\.ts/);
 });
 
@@ -159,9 +165,25 @@ test("guarda de path traversal bloqueia caminhos fora de REPORT_DIR", () => {
     );
 });
 
+test("validação de webhook bloqueia HTTP inseguro, loopback e redes privadas", async () => {
+    await assert.rejects(
+        () => validarUrlWebhookSegura("http://parceiro.exemplo.com/hook"),
+        /HTTPS/,
+    );
+    await assert.rejects(
+        () => validarUrlWebhookSegura("https://127.0.0.1:8080/hook"),
+        /local|privad|loopback|proibid/i,
+    );
+    await assert.rejects(
+        () => validarUrlWebhookSegura("https://169.254.169.254/latest/meta-data"),
+        /local|privad|link-local|proibid/i,
+    );
+});
+
 async function verificarInfraIntegracaoDisponivel(): Promise<string | null> {
-    if (!process.env.DATABASE_URL || !process.env.REDIS_URL) {
-        return "DATABASE_URL ou REDIS_URL não configurados no ambiente.";
+    const urlBanco = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+    if (!urlBanco || !process.env.REDIS_URL) {
+        return "TEST_DATABASE_URL/DATABASE_URL ou REDIS_URL não configurados no ambiente.";
     }
 
     try {
@@ -187,7 +209,7 @@ async function verificarInfraIntegracaoDisponivel(): Promise<string | null> {
     }
 }
 
-test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento entre chaves", async (t) => {
+test("integração: ciclo NA_FILA -> CONCLUIDA, expiração 410, webhook HMAC e reconciliação", async (t) => {
     const motivoSkip = await verificarInfraIntegracaoDisponivel();
     if (motivoSkip) {
         t.skip(motivoSkip);
@@ -199,9 +221,19 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
     const orgId = `ORG_${sufixo}`;
     const usuario = await prisma.usuario.findFirst({ select: { id: true } });
 
-    if (!usuario) {
-        t.skip("Nenhum usuário encontrado no banco para vincular chaves API de teste.");
-        return;
+    let usuarioCriado = false;
+    let usuarioId = usuario?.id;
+    if (!usuarioId) {
+        const novoUsuario = await prisma.usuario.create({
+            data: {
+                nome: `Operador Fila ${sufixo}`,
+                usuario: `fila_${sufixo}`,
+                senhaHash: "hash-teste",
+                papel: "ADMINISTRADOR",
+            },
+        });
+        usuarioId = novoUsuario.id;
+        usuarioCriado = true;
     }
 
     await prisma.organizacao.create({
@@ -216,13 +248,13 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
         nomeParceiro: `Parceiro A ${sufixo}`,
         organizacaoId: orgId,
         escopos: ["reports:generate", "reports:read"],
-    }, usuario.id);
+    }, usuarioId);
 
     const chaveB = await servicoChaves.criar({
         nomeParceiro: `Parceiro B ${sufixo}`,
         organizacaoId: orgId,
         escopos: ["reports:generate", "reports:read"],
-    }, usuario.id);
+    }, usuarioId);
 
     const servidor = app.listen(0);
     const endereco = servidor.address();
@@ -237,7 +269,7 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "X-API-Key": chaveA.chavePlana,
+                "X-API-Key": chaveA.chave,
             },
             body: JSON.stringify({
                 tipo: "RENTABILIDADE_EQUIPAMENTOS",
@@ -253,11 +285,11 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
 
         // 2. Outra chave recebe 404 ao consultar a tarefa
         const respOutraChave = await fetch(`${baseUrl}/${tarefaId}`, {
-            headers: { "X-API-Key": chaveB.chavePlana },
+            headers: { "X-API-Key": chaveB.chave },
         });
         assert.equal(respOutraChave.status, 404);
 
-        // 3. Processa a tarefa e valida ciclo NA_FILA -> CONCLUIDA + download
+        // 3. Processa a tarefa e valida ciclo NA_FILA -> CONCLUIDA + download streaming
         await processarTarefaRelatorio(tarefaId, { tentativaAtual: 1, maxTentativas: 3 });
 
         const tarefaConcluida = await prisma.tarefaRelatorio.findUnique({
@@ -267,19 +299,31 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
         caminhoArquivoGerado = tarefaConcluida?.caminhoArquivo ?? null;
 
         const respDownload = await fetch(`${baseUrl}/${tarefaId}/download`, {
-            headers: { "X-API-Key": chaveA.chavePlana },
+            headers: { "X-API-Key": chaveA.chave },
         });
         assert.equal(respDownload.status, 200);
         const conteudoCsv = await respDownload.text();
         assert.match(conteudoCsv, /"resumo","valor"/);
 
-        // 4. Falha transitória mantém NA_FILA até esgotar tentativas
+        // 4. Tarefa expirada responde HTTP 410 RELATORIO_EXPIRADO
+        await prisma.tarefaRelatorio.update({
+            where: { id: tarefaId },
+            data: { expiraEm: new Date(Date.now() - 60_000) },
+        });
+        const respExpirada = await fetch(`${baseUrl}/${tarefaId}/download`, {
+            headers: { "X-API-Key": chaveA.chave },
+        });
+        assert.equal(respExpirada.status, 410);
+        const corpoExpirada = await respExpirada.json() as { codigo: string };
+        assert.equal(corpoExpirada.codigo, "RELATORIO_EXPIRADO");
+
+        // 5. Falha permanente de validação marca FALHOU imediatamente na 1ª tentativa
         const tarefaRetry = await prisma.tarefaRelatorio.create({
             data: {
                 organizacaoId: orgId,
                 chaveApiId: chaveA.id,
-                tipo: "TIPO_INEXISTENTE" as never,
-                parametros: {},
+                tipo: "EFICIENCIA_OPERACIONAL",
+                parametros: { dataInicio: "data-invalida" },
                 formato: "JSON",
             },
         });
@@ -291,6 +335,57 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
             where: { id: tarefaRetry.id },
         });
         assert.equal(aposFalhaPermanente?.status, "FALHOU");
+
+        // 6. Webhook assinado com HMAC-SHA256
+        const segredoWebhook = await prisma.chaveApi.findUniqueOrThrow({
+            where: { id: chaveA.id },
+            select: { segredoWebhookHash: true },
+        });
+        assert.ok(segredoWebhook.segredoWebhookHash);
+
+        await prisma.tarefaRelatorio.update({
+            where: { id: tarefaId },
+            data: { webhookUrl: "https://example.com/webhook-greencode" },
+        });
+
+        let assinaturaRecebida = "";
+        let corpoRecebido = "";
+        const fetchMock = mock.method(
+            globalThis,
+            "fetch",
+            async (_url: unknown, init?: RequestInit) => {
+                const headers = (init?.headers ?? {}) as Record<string, string>;
+                assinaturaRecebida = headers["X-Greencode-Signature"] ?? headers["x-greencode-signature"] ?? "";
+                corpoRecebido = String(init?.body ?? "");
+                return new Response("ok", { status: 200 });
+            },
+        );
+
+        try {
+            await entregarWebhookRelatorio(tarefaId);
+            const esperado = createHmac("sha256", segredoWebhook.segredoWebhookHash)
+                .update(corpoRecebido)
+                .digest("hex");
+            assert.equal(assinaturaRecebida, `sha256=${esperado}`);
+        } finally {
+            fetchMock.mock.restore();
+        }
+
+        // 7. Reconciliação reenfileira tarefa órfã no banco
+        const orfa = await prisma.tarefaRelatorio.create({
+            data: {
+                organizacaoId: orgId,
+                chaveApiId: chaveA.id,
+                tipo: "RENTABILIDADE_EQUIPAMENTOS",
+                parametros: {},
+                formato: "JSON",
+                status: "NA_FILA",
+                criadoEm: new Date(Date.now() - 10 * 60_000),
+            },
+        });
+        const resultadoReconciliacao = await reconciliarTarefasOrfas();
+        assert.ok(resultadoReconciliacao.reenfileiradas >= 1);
+        await prisma.tarefaRelatorio.deleteMany({ where: { id: orfa.id } });
     } finally {
         servidor.close();
         await fecharFilaRelatorios().catch(() => undefined);
@@ -301,5 +396,8 @@ test("integração: ciclo NA_FILA -> CONCLUIDA, falha com retry e isolamento ent
         await prisma.relatorioAnalitico.deleteMany({ where: { organizacaoId: orgId } });
         await prisma.chaveApi.deleteMany({ where: { organizacaoId: orgId } });
         await prisma.organizacao.deleteMany({ where: { id: orgId } });
+        if (usuarioCriado && usuarioId) {
+            await prisma.usuario.deleteMany({ where: { id: usuarioId } });
+        }
     }
 });

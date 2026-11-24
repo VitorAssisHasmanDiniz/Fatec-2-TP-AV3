@@ -24,6 +24,11 @@ import openapiPublica from "./modules/apiPublica/openapi.js";
 
 const app = express();
 
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY || "0", 10);
+if (Number.isFinite(trustProxyHops) && trustProxyHops > 0) {
+    app.set("trust proxy", trustProxyHops);
+}
+
 app.use(helmet());
 
 app.get("/api-docs.json", (_req, res) => {

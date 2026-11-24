@@ -13,6 +13,7 @@ import type {
     EntradaCriarTarefaRelatorio,
     FiltrosListarTarefasRelatorio,
 } from "./validacoes.js";
+import { validarUrlWebhookSegura } from "./webhook.js";
 
 const STATUS_ATIVOS: StatusTarefaRelatorio[] = ["NA_FILA", "EM_EXECUCAO"];
 
@@ -79,54 +80,66 @@ export class ServicoTarefasRelatorio {
         entrada: EntradaCriarTarefaRelatorio,
         contexto: ContextoChaveApi,
     ): Promise<{ tarefaId: string; statusUrl: string }> {
-        const limiteAtivas = obterLimiteTarefasAtivas();
-
-        const ativasAtuais = await prisma.tarefaRelatorio.count({
-            where: {
-                chaveApiId: contexto.chaveId,
-                status: { in: STATUS_ATIVOS },
-            },
-        });
-
-        if (ativasAtuais >= limiteAtivas) {
-            throw new AppError(
-                `Limite de ${limiteAtivas} tarefas de relatório ativas simultaneamente atingido para esta chave API.`,
-                429,
-                "LIMITE_TAREFAS_ATIVAS",
-            );
+        if (entrada.webhookUrl) {
+            await validarUrlWebhookSegura(entrada.webhookUrl);
         }
+        const limiteAtivas = obterLimiteTarefasAtivas();
 
         const parametrosPersistidos = {
             ...entrada.parametros,
             organizacaoId: contexto.organizacaoId,
         } as Prisma.InputJsonObject;
 
-        const tarefa = await prisma.tarefaRelatorio.create({
-            data: {
-                organizacaoId: contexto.organizacaoId,
-                chaveApiId: contexto.chaveId,
-                tipo: entrada.tipo,
-                parametros: parametrosPersistidos,
-                formato: entrada.formato,
-                status: "NA_FILA",
-                progresso: 0,
-            },
-            select: { id: true },
+        const tarefa = await prisma.$transaction(async (tx: any) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${contexto.chaveId}))`;
+
+            const ativasAtuais = await tx.tarefaRelatorio.count({
+                where: {
+                    chaveApiId: contexto.chaveId,
+                    status: { in: STATUS_ATIVOS },
+                },
+            });
+
+            if (ativasAtuais >= limiteAtivas) {
+                throw new AppError(
+                    `Limite de ${limiteAtivas} tarefas de relatório ativas simultaneamente atingido para esta chave API.`,
+                    429,
+                    "LIMITE_TAREFAS_ATIVAS",
+                );
+            }
+
+            return tx.tarefaRelatorio.create({
+                data: {
+                    organizacaoId: contexto.organizacaoId,
+                    chaveApiId: contexto.chaveId,
+                    tipo: entrada.tipo,
+                    parametros: parametrosPersistidos,
+                    formato: entrada.formato,
+                    status: "NA_FILA",
+                    progresso: 0,
+                    ...(entrada.webhookUrl ? { webhookUrl: entrada.webhookUrl } : {}),
+                },
+                select: { id: true },
+            });
         });
 
         try {
             await adicionarTarefaNaFila(tarefa.id);
-        } catch (erro) {
+        } catch {
             await prisma.tarefaRelatorio.update({
                 where: { id: tarefa.id },
                 data: {
                     status: "FALHOU",
-                    erro: "Falha ao enfileirar tarefa para processamento assíncrono.",
+                    erro: "Serviço de fila indisponível no momento.",
                     concluidoEm: new Date(),
                 },
             }).catch(() => undefined);
 
-            throw erro;
+            throw new AppError(
+                "Serviço de fila indisponível no momento. Tente novamente mais tarde.",
+                503,
+                "FILA_INDISPONIVEL",
+            );
         }
 
         return {
@@ -239,6 +252,14 @@ export class ServicoTarefasRelatorio {
 
         if (!tarefa) {
             throw new AppError("Tarefa de relatório não encontrada.", 404, "TAREFA_NAO_ENCONTRADA");
+        }
+
+        if (tarefa.status === "EXPIRADA") {
+            throw new AppError(
+                "O arquivo deste relatório expirou e não está mais disponível.",
+                410,
+                "RELATORIO_EXPIRADO",
+            );
         }
 
         if (tarefa.status !== "CONCLUIDA") {

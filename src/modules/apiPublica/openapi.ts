@@ -1,9 +1,11 @@
+import { VERSAO_API_PUBLICA } from "./middlewareVersao.js";
+
 const openapiPublica = {
     openapi: "3.0.3",
     info: {
         title: "Greencode API Pública",
-        version: "1.0.0",
-        description: "API pública versionada para parceiros. Todas as operações de recursos são limitadas à organização vinculada à chave API. Escopos: tracking:read, batches:read, batches:write, reports:read e reports:generate."
+        version: VERSAO_API_PUBLICA,
+        description: "API pública versionada para parceiros. Todas as operações de recursos são limitadas à organização vinculada à chave API e não expõem campos internos de observação. Escopos: tracking:read, batches:read, batches:write, reports:read e reports:generate."
     },
     servers: [{ url: "/api/v1/public" }],
     components: {
@@ -28,6 +30,11 @@ const openapiPublica = {
                         enum: ["JSON", "CSV"],
                         default: "JSON"
                     },
+                    webhookUrl: {
+                        type: "string",
+                        format: "uri",
+                        description: "URL HTTPS opcional para notificação de conclusão assinada com HMAC-SHA256 no cabeçalho X-Greencode-Signature."
+                    },
                     parametros: {
                         type: "object",
                         description: "Parâmetros específicos do tipo de relatório (dataInicio, dataFim, unidadePeriodo ou minimoAmostras). organizacaoId é sempre inferido da chave API.",
@@ -50,7 +57,7 @@ const openapiPublica = {
                     id: { type: "string", format: "uuid" },
                     tipo: { type: "string", enum: ["EFICIENCIA_OPERACIONAL", "RENTABILIDADE_EQUIPAMENTOS", "PREVISAO_VIDA_UTIL"] },
                     formato: { type: "string", enum: ["CSV", "JSON"] },
-                    status: { type: "string", enum: ["NA_FILA", "EM_EXECUCAO", "CONCLUIDA", "FALHOU"] },
+                    status: { type: "string", enum: ["NA_FILA", "EM_EXECUCAO", "CONCLUIDA", "FALHOU", "EXPIRADA"] },
                     progresso: { type: "integer", minimum: 0, maximum: 100 },
                     relatorioAnaliticoId: { type: "string", format: "uuid", nullable: true },
                     tamanhoBytes: { type: "integer", nullable: true },
@@ -113,10 +120,11 @@ const openapiPublica = {
                             }
                         }
                     },
-                    "400": { description: "DADOS_INVALIDOS.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "400": { description: "DADOS_INVALIDOS ou WEBHOOK_URL_INVALIDA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
                     "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
                     "403": { description: "ESCOPO_INSUFICIENTE.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
-                    "429": { description: "LIMITE_TAREFAS_ATIVAS ou LIMITE_EXCEDIDO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } }
+                    "429": { description: "LIMITE_TAREFAS_ATIVAS ou LIMITE_EXCEDIDO.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
+                    "503": { description: "FILA_INDISPONIVEL.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } }
                 }
             },
             get: {
@@ -182,11 +190,44 @@ const openapiPublica = {
         "/rastreabilidade/equipamentos/{codigoBarras}": {
             get: {
                 summary: "Consultar rastreabilidade de equipamento",
-                description: "Escopo exigido: tracking:read. A consulta só retorna equipamentos da organização da chave.",
+                description: "Escopo exigido: tracking:read. Retorna apenas dados públicos do equipamento e movimentações (sem observações internas) da organização da chave.",
                 security: [{ ApiKey: [] }],
                 parameters: [{ name: "codigoBarras", in: "path", required: true, description: "Código de barras interno do equipamento.", schema: { type: "string" } }],
                 responses: {
-                    "200": { description: "Rastreabilidade consultada.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeSucesso" } } } },
+                    "200": {
+                        description: "Rastreabilidade consultada.",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/EnvelopeSucesso" },
+                                example: {
+                                    nivel: "SUCESSO",
+                                    mensagem: "Rastreabilidade consultada com sucesso.",
+                                    dados: {
+                                        codigoBarrasInterno: "GC-NB-2026-000001",
+                                        tipo: "NOTEBOOK",
+                                        marca: "Dell",
+                                        modelo: "Latitude 5440",
+                                        anoFabricacao: 2024,
+                                        estadoFisico: "BOM_ESTADO",
+                                        pesoQuilogramas: 1.45,
+                                        statusRastreamento: "EM_TRIAGEM",
+                                        lote: {
+                                            id: "LOTE-2026-001",
+                                            dataEntrada: "2026-11-10T10:00:00.000Z",
+                                            statusProcessamento: "EM_TRIAGEM"
+                                        },
+                                        historicoMovimentacao: [
+                                            {
+                                                dataHora: "2026-11-10T10:30:00.000Z",
+                                                origem: "Doca de Recebimento",
+                                                destino: "Bancada de Triagem 01"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
                     "403": { description: "ESCOPO_INSUFICIENTE.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
                     "404": { description: "Equipamento não encontrado nesta organização.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeErro" } } } },
@@ -197,7 +238,7 @@ const openapiPublica = {
         "/lotes": {
             get: {
                 summary: "Listar lotes da organização",
-                description: "Escopo exigido: batches:read. Limite de paginação de 100 registros.",
+                description: "Escopo exigido: batches:read. Limite de paginação de 100 registros. Não expõe observações internas.",
                 security: [{ ApiKey: [] }],
                 parameters: [
                     { name: "pagina", in: "query", description: "Página (começa em 1).", schema: { type: "integer", minimum: 1, default: 1 } },
@@ -207,7 +248,34 @@ const openapiPublica = {
                     { name: "dataFim", in: "query", description: "Data final inclusiva em ISO 8601.", schema: { type: "string", format: "date-time" } }
                 ],
                 responses: {
-                    "200": { description: "Lotes paginados.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeSucesso" } } } },
+                    "200": {
+                        description: "Lotes paginados.",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/EnvelopeSucesso" },
+                                example: {
+                                    nivel: "SUCESSO",
+                                    mensagem: "Lotes consultados com sucesso.",
+                                    dados: {
+                                        lotes: [
+                                            {
+                                                id: "LOTE-2026-001",
+                                                dataEntrada: "2026-11-10T10:00:00.000Z",
+                                                notaFiscal: "NF-123",
+                                                transportadora: "Transportadora Exemplo",
+                                                statusProcessamento: "RECEBIDO",
+                                                _count: { equipamentos: 5 }
+                                            }
+                                        ],
+                                        pagina: 1,
+                                        limite: 20,
+                                        total: 1,
+                                        totalPaginas: 1
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "400": { description: "PERIODO_INVALIDO ou parâmetros inválidos." },
                     "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA." },
                     "403": { description: "ESCOPO_INSUFICIENTE." },
@@ -218,7 +286,7 @@ const openapiPublica = {
                 summary: "Criar lote para a organização da chave",
                 description: "Escopo exigido: batches:write. A organização é forçada a partir da chave e não pode ser definida pelo corpo.",
                 security: [{ ApiKey: [] }],
-                requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["nf", "transp"], properties: { nf: { type: "string", maxLength: 100 }, transp: { type: "string", maxLength: 120 }, dataEntrada: { type: "string", format: "date-time" }, observacoes: { type: "string" } } }, example: { nf: "NF-123", transp: "Transportadora Exemplo", observacoes: "Coleta de equipamentos" } } } },
+                requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["nf", "transp"], properties: { nf: { type: "string", maxLength: 100 }, transp: { type: "string", maxLength: 120 }, dataEntrada: { type: "string", format: "date-time" }, observacoes: { type: "string" } } }, example: { nf: "NF-123", transp: "Transportadora Exemplo" } } } },
                 responses: {
                     "201": { description: "Lote criado.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeSucesso" } } } },
                     "400": { description: "Dados inválidos." },
@@ -231,11 +299,30 @@ const openapiPublica = {
         "/lotes/{id}": {
             get: {
                 summary: "Consultar lote",
-                description: "Escopo exigido: batches:read. Lotes de outras organizações são tratados como inexistentes.",
+                description: "Escopo exigido: batches:read. Lotes de outras organizações são tratados como inexistentes. Não expõe observações internas.",
                 security: [{ ApiKey: [] }],
                 parameters: [{ name: "id", in: "path", required: true, description: "Identificador do lote.", schema: { type: "string" } }],
                 responses: {
-                    "200": { description: "Lote encontrado.", content: { "application/json": { schema: { $ref: "#/components/schemas/EnvelopeSucesso" } } } },
+                    "200": {
+                        description: "Lote encontrado.",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/EnvelopeSucesso" },
+                                example: {
+                                    nivel: "SUCESSO",
+                                    mensagem: "Lote consultado com sucesso.",
+                                    dados: {
+                                        id: "LOTE-2026-001",
+                                        dataEntrada: "2026-11-10T10:00:00.000Z",
+                                        notaFiscal: "NF-123",
+                                        transportadora: "Transportadora Exemplo",
+                                        statusProcessamento: "RECEBIDO",
+                                        equipamentos: []
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "401": { description: "CHAVE_AUSENTE, CHAVE_INVALIDA, CHAVE_EXPIRADA ou CHAVE_REVOGADA." },
                     "403": { description: "ESCOPO_INSUFICIENTE." },
                     "404": { description: "LOTE_NAO_ENCONTRADO." },

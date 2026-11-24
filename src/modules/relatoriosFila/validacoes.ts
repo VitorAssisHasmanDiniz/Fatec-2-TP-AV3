@@ -32,16 +32,19 @@ export const criarTarefaRelatorioSchema = z.discriminatedUnion("tipo", [
         tipo: z.literal(TipoRelatorioAnalitico.EFICIENCIA_OPERACIONAL),
         formato: formatoSchema,
         parametros: parametrosEficienciaPublicoSchema.default({ unidadePeriodo: "MES" }),
+        webhookUrl: z.url().optional(),
     }).strict(),
     z.object({
         tipo: z.literal(TipoRelatorioAnalitico.RENTABILIDADE_EQUIPAMENTOS),
         formato: formatoSchema,
         parametros: parametrosPeriodoPublicoSchema.default({}),
+        webhookUrl: z.url().optional(),
     }).strict(),
     z.object({
         tipo: z.literal(TipoRelatorioAnalitico.PREVISAO_VIDA_UTIL),
         formato: formatoSchema,
         parametros: parametrosPrevisaoVidaUtilPublicoSchema.default({}),
+        webhookUrl: z.url().optional(),
     }).strict(),
 ]);
 

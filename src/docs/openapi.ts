@@ -1,3 +1,5 @@
+import { VERSAO_API_PUBLICA } from "../modules/apiPublica/middlewareVersao.js"
+
 const resposta = {
     type: "object",
     properties: {
@@ -129,7 +131,7 @@ const openapi = {
     openapi: "3.0.3",
     info: {
         title: "Greencode API - Futebol Edition",
-        version: "1.0.0",
+        version: VERSAO_API_PUBLICA,
         description: "Documentação interativa da Greencode API. Os exemplos JSON aparecem preenchidos no campo Request body antes de clicar em **Execute**. Para rotas protegidas, use **Authorize** e informe um token JWT obtido em `/auth/login`.",
         contact: { name: "Greencode API" },
     },
@@ -279,6 +281,52 @@ const openapi = {
                 responseExample: { nivel: "SUCESSO", mensagem: "Previsão de vida útil concluída.", dados: { relatorioId: "rel-uuid", tipo: "PREVISAO_VIDA_UTIL", resumo: { gruposAnalisados: 1, previsoesDisponiveis: 1, equipamentosIgnorados: 0, metodologia: "Regressão linear individual por equipamento." }, resultados: [{ tipoEquipamento: "NOTEBOOK", marca: "Dell", modelo: "Latitude", amostras: 8, metodo: "REGRESSAO_LINEAR", rQuadrado: 0.98, vidaRemanescenteMeses: 5.2, dataPrevistaInservivel: "2027-04-22T00:00:00.000Z", equipamentosAnalisados: 2, taxaFalhas: 0.5, previsaoDisponivel: true, motivoIndisponivel: null }] } },
                 additionalResponses: {
                     "404": respostaDeErro("ORGANIZACAO_NAO_ENCONTRADA", "Organização não encontrada.", "A organização informada não existe."),
+                },
+            }),
+        },
+        "/api/v1/internal/analytics/vida-util/comparacao": {
+            get: op("Comparar previsão de vida útil com ocorrências reais", ["Analytics"], {
+                parameters: [
+                    {
+                        name: "relatorioId",
+                        in: "query",
+                        required: true,
+                        description: "UUID do relatório analítico de previsão de vida útil.",
+                        schema: {
+                            type: "string",
+                            format: "uuid",
+                            example: "00000000-0000-4000-8000-000000000001",
+                        },
+                    },
+                ],
+                description: "Disponível para qualquer perfil autenticado. Compara dataPrevistaInservivel com a primeira observação real posterior ao relatório em que indiceCondicao <= 0 ou falhaRegistrada = true, retornando o erro em dias por grupo e o MAE agregado.",
+                responseExample: {
+                    nivel: "SUCESSO",
+                    mensagem: "Comparação entre previsão e realizado de vida útil concluída.",
+                    dados: {
+                        relatorioId: "00000000-0000-4000-8000-000000000001",
+                        geradoEm: "2026-10-01T00:00:00.000Z",
+                        gruposAvaliados: 1,
+                        gruposComRealizado: 1,
+                        maeDias: 4.5,
+                        itens: [
+                            {
+                                tipoEquipamento: "NOTEBOOK",
+                                marca: "Dell",
+                                modelo: "Latitude",
+                                previsto: "2026-11-15T00:00:00.000Z",
+                                realizado: "2026-11-19T12:00:00.000Z",
+                                erroDias: 4.5,
+                            },
+                        ],
+                    },
+                },
+                additionalResponses: {
+                    "404": respostaDeErro(
+                        "RELATORIO_NAO_ENCONTRADO",
+                        "Relatório analítico não encontrado.",
+                        "Não existe relatório com o UUID informado.",
+                    ),
                 },
             }),
         },

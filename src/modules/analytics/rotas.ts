@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { obterComparacaoVidaUtil } from "./services/comparacaoVidaUtilService.js";
 import { z } from "zod";
 import { Prisma } from "../../../generated/prisma/client.js";
 import AppError from "../../errors/AppError.js";
@@ -118,7 +119,20 @@ analyticsRouter.post(
         });
     },
 );
+const comparacaoVidaUtilSchema = z.object({
+    relatorioId: z.uuid("relatorioId deve ser um UUID válido."),
+});
 
+analyticsRouter.get("/vida-util/comparacao", async (req, res) => {
+    const { relatorioId } = validar(comparacaoVidaUtilSchema, req.query);
+    const dados = await obterComparacaoVidaUtil(relatorioId);
+
+    res.json({
+        nivel: "SUCESSO",
+        mensagem: "Comparação entre previsão e realizado de vida útil concluída.",
+        dados,
+    });
+});
 analyticsRouter.get("/historico", async (req, res) => {
     const filtros = validar(historicoSchema, req.query);
     const relatorios = await obterHistoricoRelatorios({

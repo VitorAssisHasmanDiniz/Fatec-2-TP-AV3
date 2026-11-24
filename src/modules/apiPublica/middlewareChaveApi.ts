@@ -4,6 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import { prisma } from "../../lib/prisma.js";
 import AppError from "../../errors/AppError.js";
 import { validarFormatoChaveApi } from "./ServicoChavesApi.js";
+import { criarStoreRateLimit } from "./storeRateLimit.js";
 
 export type EscopoChaveApi =
     | "tracking:read"
@@ -26,11 +27,13 @@ export interface RequisicaoComChaveApi extends Request {
 const limitadorTentativasInvalidas = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
+    store: criarStoreRateLimit("tentativas-invalidas"),
+    passOnStoreError: true,
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req, _res, next) => {
         next(new AppError("Muitas tentativas com chave API inválida", 429, "TENTATIVAS_INVALIDAS_EXCEDIDAS"));
-    }
+    },
 });
 
 function hashParaComparacao(valor: string): Buffer {
@@ -100,13 +103,13 @@ export function exigirChaveApi(escopo: EscopoChaveApi) {
                 chaveId: registro.id,
                 organizacaoId: registro.organizacaoId,
                 escopos: registro.escopos,
-                limitePorMinuto: registro.limitePorMinuto
+                limitePorMinuto: registro.limitePorMinuto,
             };
 
             if (!registro.ultimoUsoEm || Date.now() - registro.ultimoUsoEm.getTime() >= 60_000) {
                 void prisma.chaveApi.update({
                     where: { id: registro.id },
-                    data: { ultimoUsoEm: new Date() }
+                    data: { ultimoUsoEm: new Date() },
                 }).catch(() => undefined);
             }
 
