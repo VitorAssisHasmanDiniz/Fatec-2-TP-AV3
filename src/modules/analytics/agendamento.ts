@@ -34,7 +34,18 @@ async function executarSemConcorrencia(nome: string, executar: () => Promise<unk
     }
 }
 
+export function obterModoAgendadorAnalytics(): "servidor" | "worker" {
+    const modo = process.env.ANALYTICS_AGENDADOR?.trim().toLowerCase();
+    return modo === "worker" ? "worker" : "servidor";
+}
+
 export function iniciarAgendamentosAnaliticos(): void {
+    if (inicializado) return;
+
+    if (obterModoAgendadorAnalytics() !== "servidor") {
+        logger.info("Agendamento analítico no servidor desativado (ANALYTICS_AGENDADOR=worker).");
+        return;
+    }
     if (inicializado) return;
 
     const trabalhos: TrabalhoAgendado[] = [

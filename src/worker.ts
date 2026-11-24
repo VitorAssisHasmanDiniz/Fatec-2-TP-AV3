@@ -3,10 +3,24 @@ import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { prisma } from "./lib/prisma.js";
 import {
+    executarAnaliseEficienciaOperacional,
+    executarAnaliseRentabilidadeEquipamentos,
+    executarPrevisaoVidaUtil,
+} from "./modules/analytics/index.js";
+import {
     NOME_FILA_RELATORIOS,
     processarTarefaRelatorio
 } from "./modules/relatoriosFila/processador.js";
-import type { DadosTarefaRelatorio } from "./modules/relatoriosFila/fila.js";
+import {
+    JOB_ANALYTICS_EFICIENCIA,
+    JOB_ANALYTICS_RENTABILIDADE,
+    JOB_ANALYTICS_VIDA_UTIL,
+    JOB_LIMPAR_EXPIRADOS,
+    fecharFilaRelatorios,
+    registrarAgendamentosWorker,
+    type DadosTarefaRelatorio,
+} from "./modules/relatoriosFila/fila.js";
+import { limparRelatoriosExpirados } from "./modules/relatoriosFila/limpezaExpirados.js";
 
 const urlRedis = process.env.REDIS_URL || "redis://localhost:6379";
 const concorrenciaConfigurada = Number.parseInt(
@@ -30,14 +44,39 @@ const conexaoRedis = new Redis(urlRedis, {
 const worker = new Worker<DadosTarefaRelatorio>(
     NOME_FILA_RELATORIOS,
     async (trabalho) => {
-        const maxTentativas = typeof trabalho.opts.attempts === "number" && trabalho.opts.attempts > 0
-            ? trabalho.opts.attempts
-            : (Number.isFinite(maxTentativasPadrao) && maxTentativasPadrao > 0 ? maxTentativasPadrao : 3);
+        switch (trabalho.name) {
+            case JOB_LIMPAR_EXPIRADOS: {
+                await limparRelatoriosExpirados();
+                return;
+            }
+            case JOB_ANALYTICS_EFICIENCIA: {
+                await executarAnaliseEficienciaOperacional({ unidadePeriodo: "MES" });
+                return;
+            }
+            case JOB_ANALYTICS_RENTABILIDADE: {
+                await executarAnaliseRentabilidadeEquipamentos();
+                return;
+            }
+            case JOB_ANALYTICS_VIDA_UTIL: {
+                await executarPrevisaoVidaUtil();
+                return;
+            }
+            default: {
+                const tarefaId = trabalho.data?.tarefaId;
+                if (!tarefaId) {
+                    return;
+                }
 
-        await processarTarefaRelatorio(trabalho.data.tarefaId, {
-            tentativaAtual: trabalho.attemptsMade + 1,
-            maxTentativas,
-        });
+                const maxTentativas = typeof trabalho.opts.attempts === "number" && trabalho.opts.attempts > 0
+                    ? trabalho.opts.attempts
+                    : (Number.isFinite(maxTentativasPadrao) && maxTentativasPadrao > 0 ? maxTentativasPadrao : 3);
+
+                await processarTarefaRelatorio(tarefaId, {
+                    tentativaAtual: trabalho.attemptsMade + 1,
+                    maxTentativas,
+                });
+            }
+        }
     },
     {
         connection: conexaoRedis,
@@ -46,12 +85,12 @@ const worker = new Worker<DadosTarefaRelatorio>(
 );
 
 worker.on("completed", (trabalho) => {
-    console.info(`Tarefa de relatório ${trabalho.id} processada.`);
+    console.info(`Job ${trabalho.name} (${trabalho.id}) processado.`);
 });
 
 worker.on("failed", (trabalho, erro) => {
     console.error(
-        `Falha na tarefa de relatório ${trabalho?.id ?? "desconhecida"}:`,
+        `Falha no job ${trabalho?.name ?? "desconhecido"} (${trabalho?.id ?? "sem-id"}):`,
         erro.message
     );
 });
@@ -72,6 +111,7 @@ async function encerrarWorker(sinal: string): Promise<void> {
 
     try {
         await worker.close();
+        await fecharFilaRelatorios();
         await conexaoRedis.quit();
         await prisma.$disconnect();
         console.info("Worker de relatórios encerrado com sucesso.");
@@ -88,6 +128,8 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
     void encerrarWorker("SIGTERM");
 });
+
+await registrarAgendamentosWorker();
 
 console.info(
     `Worker de relatórios iniciado. Fila: ${NOME_FILA_RELATORIOS}. Concorrência: ${concorrencia}.`
