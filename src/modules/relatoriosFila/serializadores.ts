@@ -1,3 +1,5 @@
+const PREFIXOS_INJECAO_CSV = /^[ \t\r\n]*[=+\-@]/;
+
 function normalizarValor(valor: unknown): string {
     if (valor === null || valor === undefined) {
         return "";
@@ -14,8 +16,15 @@ function normalizarValor(valor: unknown): string {
     return String(valor);
 }
 
+function neutralizarInjecaoCsv(texto: string): string {
+    if (PREFIXOS_INJECAO_CSV.test(texto)) {
+        return `'${texto}`;
+    }
+    return texto;
+}
+
 function escaparCampoCsv(valor: unknown): string {
-    const texto = normalizarValor(valor);
+    const texto = neutralizarInjecaoCsv(normalizarValor(valor));
     return `"${texto.replace(/"/g, '""')}"`;
 }
 
